@@ -158,6 +158,17 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       this.persistStatus();
       return;
     }
+    // 密码登录被国网风控拒绝（典型如 RK007「密码过于简单」）时，让用户走
+    // 「短信验证码登录」绕过密码校验。这条登录态由设置页写入 session.json，
+    // 因此这里同样进入 needs_verification 并轮询磁盘，恢复成功后自动重连。
+    if (error instanceof StateGridAuthenticationError) {
+      this.status.state = 'needs_verification';
+      this.status.message = '密码登录被国网拒绝，请在插件设置页用「短信验证码登录」';
+      this.log.warn(`国家电网密码登录失败：${message}；请改用短信验证码登录`);
+      this.persistStatus();
+      this.startVerifyPolling();
+      return;
+    }
     this.status.state = 'error';
     this.status.message = message;
     this.log.error(`国家电网数据获取失败：${message}`);

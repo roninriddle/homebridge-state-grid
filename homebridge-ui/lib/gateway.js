@@ -75,9 +75,11 @@ class UiGateway {
 
     const account = this.store.loadAccount();
     const username = credentials?.username || account?.username || '';
+    // 短信登录不需要密码，所以这里只强制要求手机号；密码登录（/login）在
+    // 前端已经做了「手机号与密码都要填」的校验，这里留空密码也能安全地发短信。
     const password = credentials?.password || this.store.loadPassword() || '';
-    if (!username || !password) {
-      throw new Error('请先填写手机号与密码');
+    if (!username) {
+      throw new Error('请先填写手机号');
     }
 
     const assembled = assembleProfile(this.store);
@@ -155,9 +157,10 @@ class UiGateway {
   /**
    * 请求短信验证码。
    * `kind=device` 用于新设备校验（登录返回 4006 后），`kind=login` 用于短信验证码登录。
+   * 短信登录允许只传手机号（不填密码也能发码）。
    */
-  async sendSms(kind) {
-    const client = this.ensureClient();
+  async sendSms(kind, username) {
+    const client = this.ensureClient(username ? { username } : undefined);
     try {
       const codeKey =
         kind === 'login' ? await client.sendLoginSms() : await client.sendDeviceVerificationSms();
@@ -168,7 +171,12 @@ class UiGateway {
     }
   }
 
-  /** 提交验证码。新设备校验与短信登录走同一个入口，按 pending.kind 分流。 */
+  /**
+   * 提交验证码。按 pending.kind 分流到两条不同的协议：
+   *  - kind='device'：新设备校验（businessType=logindevice），验证码要随「密码登录」一起
+   *    重新提交（等价上游 config_flow 里的 async_login(verification_code, code_key)）；
+   *  - kind='login'：短信验证码登录（businessType=login），走独立的 smsLogin 接口。
+   */
   async verify(code) {
     if (!this.pending || !this.pending.codeKey) {
       return { ok: false, reason: 'error', message: '请先点击发送验证码' };
@@ -178,7 +186,10 @@ class UiGateway {
     }
     const client = this.ensureClient();
     try {
-      const session = await client.smsLogin(String(code), this.pending.codeKey);
+      const session =
+        this.pending.kind === 'login'
+          ? await client.smsLogin(String(code), this.pending.codeKey)
+          : await client.login({ verificationCode: String(code), codeKey: this.pending.codeKey });
       this.persistSession(session);
       this.pending = null;
       return { ok: true, accounts: this.accountsOf(client) };

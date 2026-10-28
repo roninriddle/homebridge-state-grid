@@ -358,19 +358,30 @@ export class StateGridClient {
     };
   }
 
-  /** 触发新设备短信验证码。返回服务端的 codeKey。 */
+  /** 从短信接口响应里取 codeKey：上游确认它在 data.bizrt.codeKey 里。 */
+  private smsCodeKey(data: Record<string, unknown>): string {
+    const bizrt = asRecord(data.bizrt);
+    const codeKey = bizrt ? String(bizrt.codeKey ?? '') : '';
+    if (!codeKey) {
+      throw new StateGridApiError('missing_code_key', '短信响应未返回 codeKey', 'srvrt');
+    }
+    return codeKey;
+  }
+
+  /** 触发新设备短信验证码（businessType=logindevice）。返回服务端的 codeKey。 */
   async sendDeviceVerificationSms(): Promise<string> {
     const payload = buildDeviceSmsPayload(this.username, this.context());
     const response = await this.post(PATHS.deviceSms, payload, { authenticated: false });
     const data = this.raiseForError(response);
-    return String(data.codeKey ?? data.bizrt ?? '');
+    return this.smsCodeKey(data);
   }
 
+  /** 触发短信验证码登录（businessType=login）。返回服务端的 codeKey。 */
   async sendLoginSms(): Promise<string> {
     const payload = buildLoginSmsPayload(this.username, this.context());
     const response = await this.post(PATHS.deviceSms, payload, { authenticated: false });
     const data = this.raiseForError(response);
-    return String(data.codeKey ?? data.bizrt ?? '');
+    return this.smsCodeKey(data);
   }
 
   async smsLogin(code: string, codeKey: string): Promise<LoginSession> {

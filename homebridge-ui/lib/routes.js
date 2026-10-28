@@ -37,10 +37,12 @@ function registerRoutes(server, gateway) {
     safe(async (payload) => gateway.login({ username: payload.username, password: payload.password })),
   );
 
-  /** 发送短信验证码，payload.kind 为 'device' | 'login'。 */
+  /** 发送短信验证码，payload.kind 为 'device' | 'login'，可带 username（短信登录只填手机号）。 */
   server.onRequest(
     '/send-sms',
-    safe(async (payload) => gateway.sendSms(payload.kind === 'login' ? 'login' : 'device')),
+    safe(async (payload) =>
+      gateway.sendSms(payload.kind === 'login' ? 'login' : 'device', payload.username),
+    ),
   );
 
   /** 提交验证码。 */

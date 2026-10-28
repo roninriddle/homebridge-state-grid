@@ -136,8 +136,8 @@
       <section class="panel">
         <h2>账号登录</h2>
         <p class="hint">
-          用「网上国网」App 的手机号与密码登录。首次在新设备登录时，国家电网会要求短信验证，
-          点登录后按提示操作即可。
+          用「网上国网」App 的手机号登录。国网对「密码登录」有风控（密码过于简单时会返回
+          RK007「网络连接超时」），此时请改用「短信验证码登录」绕过密码校验。
         </p>
         <div class="row">
           <div>
@@ -146,11 +146,12 @@
           </div>
           <div>
             <label for="password">密码</label>
-            <input id="password" type="password" autocomplete="current-password" placeholder="登录密码" />
+            <input id="password" type="password" autocomplete="current-password" placeholder="密码登录才需要" />
           </div>
         </div>
         <div class="actions">
-          <button class="primary" id="loginBtn">登录</button>
+          <button class="primary" id="loginBtn">密码登录</button>
+          <button id="smsLoginBtn">短信验证码登录</button>
           <button class="ghost" id="resetBtn">清除本机登录态</button>
         </div>
         <div class="tip hidden" id="loginTip"></div>
@@ -362,7 +363,35 @@
             );
             return;
           }
+          if (result.reason === 'bad_credentials') {
+            showTip(
+              'loginTip',
+              '密码登录被国网拒绝（可能是密码过于简单触发 RK007 风控）。请改用「短信验证码登录」。',
+              'err',
+            );
+            return;
+          }
           showTip('loginTip', result.message || '登录失败', 'err');
+        }),
+      );
+
+      // 短信验证码登录：绕过密码校验，国网对密码登录有风控时用这条路。
+      $('smsLoginBtn').addEventListener('click', () =>
+        withBusy($('smsLoginBtn'), async () => {
+          showTip('loginTip', '');
+          const username = $('username').value.trim();
+          if (!/^\d{11}$/.test(username)) {
+            showTip('loginTip', '请先填写 11 位手机号。', 'err');
+            return;
+          }
+          const result = await bridge.request('/send-sms', { kind: 'login', username });
+          if (!result.ok) {
+            showTip('loginTip', result.message || '发送验证码失败', 'err');
+            return;
+          }
+          $('smsBox').classList.remove('hidden');
+          showTip('loginTip', '验证码已发送，请查收短信后输入并提交。', '');
+          showTip('smsTip', '验证码已发送，请查收短信。', '');
         }),
       );
 
