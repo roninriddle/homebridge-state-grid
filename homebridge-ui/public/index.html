@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>网上国网 · 用电卡片</title>
+    <style>
+      :root {
+        --bg: #f4f5f7;
+        --panel: #ffffff;
+        --text: #1c1f23;
+        --muted: #6b7280;
+        --line: #e3e6ea;
+        --accent: #c8102e;
+        --accent-soft: #fdecef;
+        --ok: #15803d;
+        --warn: #b45309;
+        --err: #b91c1c;
+        --radius: 12px;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #16181c;
+          --panel: #1f2228;
+          --text: #eceff3;
+          --muted: #9aa3ae;
+          --line: #313640;
+          --accent: #ff5a6e;
+          --accent-soft: #3a2126;
+          --ok: #4ade80;
+          --warn: #fbbf24;
+          --err: #f87171;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      }
+      .wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 16px; }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        padding: 18px 20px;
+      }
+      h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+      .hint { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
+
+      .status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+      .dot.ok { background: var(--ok); }
+      .dot.warn { background: var(--warn); }
+      .dot.err { background: var(--err); }
+      .meta { margin-left: auto; color: var(--muted); font-size: 12.5px; }
+
+      label { display: block; font-size: 12.5px; color: var(--muted); margin: 12px 0 6px; }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-size: 14px;
+      }
+      input:focus { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+
+      button {
+        padding: 9px 16px;
+        border-radius: 9px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--text);
+        font: inherit;
+        font-size: 13.5px;
+        cursor: pointer;
+      }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 500; }
+      button.ghost { color: var(--muted); }
+      button:disabled { opacity: .5; cursor: default; }
+
+      .tip {
+        margin-top: 12px;
+        padding: 10px 12px;
+        border-radius: 9px;
+        font-size: 13px;
+        background: var(--accent-soft);
+        border: 1px solid transparent;
+      }
+      .tip.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
+      .tip.err { background: transparent; border-color: var(--err); color: var(--err); }
+      .hidden { display: none !important; }
+
+      .acct { border-top: 1px solid var(--line); padding: 14px 0; }
+      .acct:first-of-type { border-top: none; }
+      .acct-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+      .acct-name { font-weight: 600; }
+      .acct-sub { color: var(--muted); font-size: 12.5px; }
+      .acct-body { display: grid; grid-template-columns: 1fr 260px; gap: 16px; margin-top: 12px; align-items: start; }
+      @media (max-width: 640px) { .acct-body { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
+      .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
+      .metric { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
+      .metric .k { color: var(--muted); font-size: 11.5px; }
+      .metric .v { font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
+      .metric .v small { font-size: 11px; color: var(--muted); margin-left: 2px; }
+      .shot { width: 100%; border-radius: 10px; border: 1px solid var(--line); display: block; background: #000; }
+      .shot.empty { display: grid; place-items: center; height: 146px; color: var(--muted); font-size: 12px; }
+
+      ol.steps { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
+      ol.steps li { margin: 4px 0; }
+      code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- 连接状态 -->
+      <section class="panel">
+        <h2>连接状态</h2>
+        <p class="hint">凭据加密保存在 Homebridge 的 storage 目录，只有本机同一用户能解开。</p>
+        <div class="status">
+          <span class="dot" id="dot"></span>
+          <span id="stateText">正在读取…</span>
+          <span class="meta" id="metaText"></span>
+        </div>
+        <div class="tip hidden" id="statusTip"></div>
+      </section>
+
+      <!-- 登录 -->
+      <section class="panel">
+        <h2>账号登录</h2>
+        <p class="hint">
+          用「网上国网」App 的手机号与密码登录。首次在新设备登录时，国家电网会要求短信验证，
+          点登录后按提示操作即可。
+        </p>
+        <div class="row">
+          <div>
+            <label for="username">手机号</label>
+            <input id="username" inputmode="numeric" autocomplete="username" placeholder="11 位手机号" />
+          </div>
+          <div>
+            <label for="password">密码</label>
+            <input id="password" type="password" autocomplete="current-password" placeholder="登录密码" />
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="loginBtn">登录</button>
+          <button class="ghost" id="resetBtn">清除本机登录态</button>
+        </div>
+        <div class="tip hidden" id="loginTip"></div>
+
+        <!-- 短信验证 -->
+        <div class="hidden" id="smsBox">
+          <label for="smsCode">短信验证码</label>
+          <div class="row">
+            <input id="smsCode" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+            <div class="actions" style="margin: 0">
+              <button id="sendSmsBtn">发送验证码</button>
+              <button class="primary" id="verifyBtn">提交</button>
+            </div>
+          </div>
+          <div class="tip hidden" id="smsTip"></div>
+        </div>
+      </section>
+
+      <!-- 户号 -->
+      <section class="panel">
+        <h2>户号与卡片预览</h2>
+        <p class="hint">
+          每张卡片对应一个户号，在「家庭」App 里就是一路摄像头。卡片标题、主题、更新周期在插件设置里改。
+        </p>
+        <div class="actions" style="margin-top: 0">
+          <button id="loadBtn">读取户号</button>
+        </div>
+        <div id="accounts" style="margin-top: 6px"></div>
+        <div class="tip hidden" id="accountsTip"></div>
+      </section>
+
+      <!-- 说明 -->
+      <section class="panel">
+        <h2>接下来</h2>
+        <ol class="steps">
+          <li>登录成功后，插件会把户号写进日志；在插件设置里给每个户号起个标题、决定是否显示。</li>
+          <li>保存设置后重启 Homebridge，用「家庭」App 扫码添加 Homebridge。</li>
+          <li>添加完成后，首页会出现对应数量的摄像头，点开即是有画面的用电卡片。</li>
+          <li>更新周期最短 6 小时、最长 24 小时；数据没拿到时卡片会显示「—」并标注未更新，不会补 0。</li>
+        </ol>
+      </section>
+    </div>
+
+    <script>
+      // homebridge-config-ui-x 注入的浏览器 API；直接用 file:// 打开时不存在，给个空壳避免报错。
+      const bridge = window.homebridge || {
+        request: () => Promise.reject(new Error('请在 Homebridge 设置页中打开本页面')),
+      };
+
+      const $ = (id) => document.getElementById(id);
+      let currentAccounts = [];
+
+      function setDot(kind, text) {
+        $('dot').className = 'dot ' + (kind || '');
+        $('stateText').textContent = text;
+      }
+
+      function showTip(id, message, kind) {
+        const el = $(id);
+        if (!message) {
+          el.classList.add('hidden');
+          return;
+        }
+        el.className = 'tip ' + (kind || '');
+        el.textContent = message;
+        el.classList.remove('hidden');
+      }
+
+      function fmt(value, unit, digits) {
+        if (value === null || value === undefined) return '—';
+        const n = Number(value);
+        if (!Number.isFinite(n)) return '—';
+        const fixed = digits === undefined ? n : Number(n.toFixed(digits));
+        return `${fixed}${unit ? `<small>${unit}</small>` : ''}`;
+      }
+
+      function metric(key, value) {
+        return `<div class="metric"><div class="k">${key}</div><div class="v">${value}</div></div>`;
+      }
+
+      async function refreshStatus() {
+        try {
+          const status = await bridge.request('/status');
+          if (!status.ok) {
+            setDot('err', status.message || '读取失败');
+            return;
+          }
+          if (status.connected) setDot('ok', '已登录');
+          else if (status.hasSession) setDot('warn', '已有会话，等待主进程刷新');
+          else setDot('', '未登录');
+
+          const bits = [];
+          if (status.username) bits.push(status.username);
+          if (status.hasPassword) bits.push('密码已保存');
+          $('metaText').textContent = bits.join(' · ');
+
+          if (status.pending && status.pending.kind) {
+            $('smsBox').classList.remove('hidden');
+            showTip('smsTip', '已完成一次登录尝试，需要短信验证码才能继续。', 'warn');
+          }
+        } catch (error) {
+          setDot('err', error.message || String(error));
+        }
+      }
+
+      function renderAccounts(list) {
+        currentAccounts = list || [];
+        const box = $('accounts');
+        if (!currentAccounts.length) {
+          box.innerHTML = '<div class="tip warn">没有读到户号。确认账号已绑定户号，或稍后再试。</div>';
+          return;
+        }
+        box.innerHTML = currentAccounts
+          .map(
+            (a) => `
+          <div class="acct" data-consno="${a.consNo}">
+            <div class="acct-head">
+              <span class="acct-name">${a.name || '未命名户号'}</span>
+              <span class="acct-sub">${a.consNoMasked}${a.consType ? ' · ' + a.consType : ''}</span>
+              ${a.address ? `<span class="acct-sub">${a.address}</span>` : ''}
+            </div>
+            <div class="acct-body">
+              <div class="metrics" id="m-${a.consNo}">
+                <div class="metric"><div class="k">数据</div><div class="v">读取中…</div></div>
+              </div>
+              <div class="shot empty" id="s-${a.consNo}">预览生成中…</div>
+            </div>
+          </div>`,
+          )
+          .join('');
+        for (const account of currentAccounts) void loadPreview(account.consNo);
+      }
+
+      async function loadPreview(consNo) {
+        const metrics = $('m-' + consNo);
+        const shot = $('s-' + consNo);
+        try {
+          const result = await bridge.request('/preview', { consNo });
+          if (!result.ok) {
+            if (metrics) metrics.innerHTML = metric('数据', '—');
+            if (shot) {
+              shot.className = 'shot empty';
+              shot.textContent = result.message || '读取失败';
+            }
+            return;
+          }
+          const s = result.snapshot || {};
+          if (metrics) {
+            metrics.innerHTML = [
+              metric('余额', fmt(s.balance, '元', 2)),
+              metric('今日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
+              metric('本月用电', fmt(s.currentMonthUsage, 'kWh', 2)),
+              metric('本月估算', fmt(s.estimate, '元', 2)),
+              metric('上月用电', fmt(s.latestMonthUsage, 'kWh', 2)),
+              metric('本年电量', fmt(s.currentYearUsage, 'kWh', 1)),
+            ].join('');
+          }
+          if (shot && result.image) {
+            shot.className = 'shot';
+            shot.outerHTML = `<img class="shot" id="s-${consNo}" src="${result.image}" alt="用电卡片预览" />`;
+          }
+        } catch (error) {
+          if (shot) {
+            shot.className = 'shot empty';
+            shot.textContent = error.message || String(error);
+          }
+        }
+      }
+
+      async function withBusy(button, task) {
+        const label = button.textContent;
+        button.disabled = true;
+        button.textContent = '请稍候…';
+        try {
+          return await task();
+        } finally {
+          button.disabled = false;
+          button.textContent = label;
+        }
+      }
+
+      $('loginBtn').addEventListener('click', () =>
+        withBusy($('loginBtn'), async () => {
+          showTip('loginTip', '');
+          const username = $('username').value.trim();
+          const password = $('password').value;
+          if (!username || !password) {
+            showTip('loginTip', '手机号和密码都要填。', 'err');
+            return;
+          }
+          const result = await bridge.request('/login', { username, password });
+          if (result.ok) {
+            $('password').value = '';
+            showTip('loginTip', '登录成功。', '');
+            await refreshStatus();
+            renderAccounts(result.accounts || []);
+            return;
+          }
+          if (result.reason === 'need_device_sms') {
+            $('smsBox').classList.remove('hidden');
+            showTip('loginTip', '国家电网要求新设备短信验证，请先发送验证码。', 'warn');
+            return;
+          }
+          if (result.reason === 'need_challenge') {
+            showTip(
+              'loginTip',
+              `需要完成安全校验（${result.code || 'RK008'}）：请打开「网上国网」App 处理后再试。`,
+              'err',
+            );
+            return;
+          }
+          showTip('loginTip', result.message || '登录失败', 'err');
+        }),
+      );
+
+      $('sendSmsBtn').addEventListener('click', () =>
+        withBusy($('sendSmsBtn'), async () => {
+          const result = await bridge.request('/send-sms', { kind: 'device' });
+          showTip('smsTip', result.ok ? '验证码已发送，请查收短信。' : result.message || '发送失败', result.ok ? '' : 'err');
+        }),
+      );
+
+      $('verifyBtn').addEventListener('click', () =>
+        withBusy($('verifyBtn'), async () => {
+          const code = $('smsCode').value.trim();
+          if (!/^\d{6}$/.test(code)) {
+            showTip('smsTip', '验证码是 6 位数字。', 'err');
+            return;
+          }
+          const result = await bridge.request('/verify', { code });
+          if (!result.ok) {
+            showTip('smsTip', result.message || '验证失败', 'err');
+            return;
+          }
+          $('smsBox').classList.add('hidden');
+          showTip('smsTip', '');
+          await refreshStatus();
+          renderAccounts(result.accounts || []);
+        }),
+      );
+
+      $('loadBtn').addEventListener('click', () =>
+        withBusy($('loadBtn'), async () => {
+          showTip('accountsTip', '');
+          const result = await bridge.request('/accounts');
+          if (!result.ok) {
+            showTip('accountsTip', result.message || '读取失败', 'err');
+            return;
+          }
+          renderAccounts(result.accounts || []);
+        }),
+      );
+
+      $('resetBtn').addEventListener('click', () =>
+        withBusy($('resetBtn'), async () => {
+          await bridge.request('/reset');
+          $('smsBox').classList.add('hidden');
+          showTip('loginTip', '已清除内存中的登录态。磁盘上的凭据仍然保留，重新登录会覆盖。', 'warn');
+          await refreshStatus();
+        }),
+      );
+
+      void refreshStatus();
+    </script>
+  </body>
+</html>
