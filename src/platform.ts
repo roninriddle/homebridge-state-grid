@@ -72,6 +72,13 @@ const MAX_INTERVAL_HOURS = 24;
 /** 超过这个时长没拿到新数据，卡片上会显示"数据未更新"。 */
 const STALE_AFTER_MS = 26 * 3600 * 1000;
 
+/** 去掉配件名首尾的脱敏星号，避免 HomeKit 因非法字符拒绝注册。 */
+function cleanAccessoryName(name: string): string {
+  const cleaned = (name || '').replace(/^\*+|\*+$/g, '').trim();
+  // HAP 要求名称首尾各至少一个字母/数字（长度 ≥ 2），单字名（如脱敏后仅剩"邗"）无法通过校验。
+  return Array.from(cleaned).length >= 2 ? cleaned : '';
+}
+
 export class StateGridPlatform implements DynamicPlatformPlugin {
   private readonly entries = new Map<string, CameraEntry>();
   private client: StateGridClient | null = null;
@@ -102,6 +109,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   configureAccessory(accessory: PlatformAccessory): void {
+    // 历史缓存里的配件名可能带脱敏星号（如 *博帆），或只剩单字（如 邗），
+    // 都会被 HAP 拒绝，恢复时顺手修正，避免启动告警。
+    const cleaned = cleanAccessoryName(accessory.displayName);
+    if (cleaned !== accessory.displayName) {
+      const fallback = cleaned || `用电 ${accessory.UUID.split('-')[0]}`;
+      this.log.info(`配件名称已修正：${accessory.displayName} → ${fallback}`);
+      accessory.displayName = fallback;
+    }
     // 已有配件先挂到缓存，等数据到位后再补摄像头控制器。
     this.log.debug(`恢复配件 ${accessory.displayName}`);
     this.pendingAccessories.push(accessory);
@@ -275,7 +290,13 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
   private titleFor(account: PowerAccount): string {
     const match = this.configFor(account);
-    return match?.title || account.name || `用电 ${account.consNoSrc.slice(-4)}`;
+    const configured = match?.title?.trim();
+    if (configured) return configured;
+    // 国网返回的是脱敏姓名（如 *博帆），星号会让 HomeKit 拒绝注册配件，
+    // 去掉首尾星号；若去完为空则退回「用电 + 户号后 4 位」。
+    const cleanName = cleanAccessoryName(account.name || '');
+    if (cleanName) return cleanName;
+    return `用电 ${account.consNoSrc.slice(-4)}`;
   }
 
   private async refreshAll(): Promise<void> {
@@ -448,6 +469,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
    * hap 的 CameraController 负责快照/流的协商，我们只实现 delegate。
    * 用 any 是因为 homebridge 与 hap-nodejs 的类型路径随版本变化，
    * 这里宁可放宽类型也要兼容 1.8 与 2.x 两条线。
+   *
+   * 关键：新版 hap-nodejs 把「协商好的地址/端口/SRTP 密钥」只放在
+   * prepareStream 的 request 里，handleStreamRequest 阶段只有 sessionID +
+   * 分辨率/码率等参数。因此必须用 sessionID 把 prepareStream 阶段收到的
+   * 连接信息存起来，启动流时再取回。
    */
   private attachCameraController(accessory: PlatformAccessory, entry: CameraEntry): void {
     const hap = this.api.hap as unknown as Record<string, any>;
@@ -457,13 +483,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       return;
     }
 
-    const toRequest = (request: any) => ({
-      sessionID: request.sessionID,
-      address: request.targetAddress,
-      videoPort: request.video.port,
-      videoSrtpKey: request.video.srtp_key,
-      videoSrtpSalt: request.video.srtp_salt,
-    });
+    // sessionID -> prepareStream 阶段收到的连接信息。
+    const sessions = new Map<
+      string,
+      { address: string; videoPort: number; videoSrtpKey: Buffer; videoSrtpSalt: Buffer }
+    >();
 
     const delegate = {
       handleSnapshotRequest: (
@@ -480,7 +504,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       },
       prepareStream: (request: any, callback: (error?: Error, response?: unknown) => void) => {
         try {
-          const plan = entry.camera.prepareStream(toRequest(request));
+          const info = {
+            address: request.targetAddress,
+            videoPort: request.video.port,
+            videoSrtpKey: request.video.srtp_key,
+            videoSrtpSalt: request.video.srtp_salt,
+          };
+          sessions.set(request.sessionID, info);
+          const plan = entry.camera.prepareStream(info);
           callback(undefined, {
             video: {
               port: plan.port,
@@ -496,9 +527,21 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       handleStreamRequest: (request: any, callback: () => void) => {
         void (async () => {
           try {
-            const streamRequest = toRequest(request);
-            const plan = entry.camera.prepareStream(streamRequest);
-            await entry.camera.startStream(streamRequest, plan);
+            if (request.type === 'stop') {
+              entry.camera.stopStream();
+              callback();
+              return;
+            }
+            if (request.type === 'reconfigure') {
+              // 虚拟静态卡片：重配置只改变分辨率参数，无需重建 ffmpeg。
+              callback();
+              return;
+            }
+            const info = sessions.get(request.sessionID);
+            if (!info) {
+              throw new Error('找不到会话信息（session 未协商）');
+            }
+            await entry.camera.startStream(info);
             callback();
           } catch (error) {
             this.log.warn(`视频流启动失败：${(error as Error).message}`);
@@ -514,16 +557,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       streamingOptions: {
         supportedCryptoSuites: [hap.SRTPCryptoSuites.AES_CM_128_HMAC_SHA1_80],
         video: {
+          codec: {
+            profiles: [hap.H264Profile.BASELINE],
+            levels: [hap.H264Level.LEVEL3_1, hap.H264Level.LEVEL3_2],
+          },
           resolutions: [
             [1280, 720, 15],
             [640, 360, 15],
             [320, 180, 15],
-          ],
-          codecProfiles: [
-            {
-              type: hap.VideoCodecType.H264,
-              levels: [hap.H264Level.LEVEL3_1, hap.H264Level.LEVEL3_2],
-            },
           ],
         },
         audio: { codecs: [] },

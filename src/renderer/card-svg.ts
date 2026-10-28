@@ -259,9 +259,10 @@ export function renderDetailCard(data: CardData): string {
 
   const blocks = [
     { label: '本月用电', value: formatUsage(data.currentMonthUsage), unit: 'kWh' },
+    { label: '本月电费', value: formatMoney(data.monthEstimateCharge), unit: '元', estimated: true },
     { label: '最近一日', value: formatUsage(data.latestDailyUsage), unit: 'kWh' },
-    { label: '上月电费', value: formatMoney(data.latestMonthCharge), unit: '元' },
     { label: '上月用电', value: formatUsage(data.latestMonthUsage), unit: 'kWh' },
+    { label: '上月电费', value: formatMoney(data.latestMonthCharge), unit: '元' },
     { label: '本年累计用电', value: formatUsage(data.currentYearUsage), unit: 'kWh' },
     { label: '本年累计电费', value: formatMoney(data.currentYearCharge), unit: '元' },
   ].filter((block) => block.value !== '—');
@@ -283,6 +284,7 @@ export function renderDetailCard(data: CardData): string {
         block.value,
         block.unit,
         p,
+        block.estimated,
       );
     })
     .join('');

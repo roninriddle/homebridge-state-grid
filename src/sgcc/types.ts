@@ -56,20 +56,25 @@ function firstString(source: Record<string, unknown>, keys: string[]): string {
 }
 
 export function powerAccountFromApi(value: Record<string, unknown>): PowerAccount | null {
-  const accountId = firstString(value, ['acctId', 'accountId']);
-  const consNoSrc = firstString(value, ['consNoSrc', 'consNo']);
-  const consNo = firstString(value, ['consNo']) || consNoSrc;
+  // 加密户号（consNo）与未加密户号（consNo_dst）是两回事：
+  // 历史/日用电接口要求未加密户号 consNoSrc，加密串会被服务端以 code:0 拒绝。
+  const consNo = firstString(value, ['powerUserNo', 'consNo']);
+  const consNoSrc = firstString(value, ['powerUserNo_dst', 'consNo_dst']) || consNo;
+  const accountId =
+    firstString(value, ['id', 'userId', 'consNo_dst', 'powerUserNo_dst']) || consNoSrc;
   if (!consNoSrc) return null;
   return {
-    accountId: accountId || consNoSrc,
+    accountId,
     consNo,
     consNoSrc,
-    proNo: firstString(value, ['proCode', 'proNo', 'provinceCode']),
+    proNo: firstString(value, ['proNo', 'provinceId', 'proCode', 'provinceCode']),
     orgNo: firstString(value, ['orgNo']),
-    elecType: firstString(value, ['sceneType', 'elecType', 'consType']),
-    consType: firstString(value, ['consType', 'sceneType', 'elecType']),
-    name: firstString(value, ['consName', 'name', 'accountName']),
-    address: firstString(value, ['eleAddress', 'address']),
+    elecType: firstString(value, ['elecTypeCode', 'elecType', 'constType', 'sceneType', 'consType']),
+    // 日用电接口的 consType 只接受 01(低压)/02(高压)，对应 elecTypeCode，
+    // 不能用 constType（户类型，如 03）替代。
+    consType: firstString(value, ['elecTypeCode', 'elecType', 'consType', 'sceneType']),
+    name: firstString(value, ['consName_dst', 'consName', 'name', 'accountName']),
+    address: firstString(value, ['elecAddr_dst', 'elecAddr', 'eleAddress', 'address']),
     raw: value,
   };
 }

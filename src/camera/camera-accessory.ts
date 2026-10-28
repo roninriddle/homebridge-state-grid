@@ -17,7 +17,6 @@ import { deriveSessionKeys, protectRtp, type SessionKeys } from './srtp.js';
 import { nalType, packetizeNal, splitNalUnits } from './rtp.js';
 
 export interface CameraStreamRequest {
-  sessionID: string;
   address: string;
   videoPort: number;
   videoSrtpKey: Buffer;
@@ -213,7 +212,9 @@ export class UsageCamera {
     return this.plan;
   }
 
-  async startStream(request: CameraStreamRequest, plan: StreamPlan): Promise<void> {
+  async startStream(request: CameraStreamRequest): Promise<void> {
+    if (!this.plan) throw new Error('流未协商');
+    const plan = this.plan;
     this.stopStream();
     const keys = deriveSessionKeys({
       masterKey: plan.srtpKey,
