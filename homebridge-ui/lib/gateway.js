@@ -131,9 +131,25 @@ class UiGateway {
       if (described.reason === 'need_device_sms') {
         // 记下"这次登录是卡在验证码上"，前端据此把发送验证码按钮点亮。
         this.pending = { kind: 'device', codeKey: '', at: Date.now() };
+        // 关键：先把凭据落盘。设置页 server 进程会随页面关闭而终止，
+        // 下次打开是全新进程，若不落盘，发验证码/提交验证码就会用空账号
+        // 发请求，网关会返回 RK007 之类的异常。
+        this.persistCredentialsOnly();
       }
       return { ok: false, ...described };
     }
+  }
+
+  /**
+   * 只落盘凭据、不落盘 session（此时还没有拿到 token）。
+   * 用于"登录走到短信验证"这个中间态，保证换页/重开设置页后凭据还在。
+   */
+  persistCredentialsOnly() {
+    const username = this.credentials?.username;
+    const password = this.credentials?.password;
+    if (!username) return;
+    const region = (this.store.loadAccount() || {}).region;
+    this.store.saveAccount(username, password || undefined, region);
   }
 
   /**
