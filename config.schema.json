@@ -59,6 +59,41 @@
         "minimum": 360,
         "maximum": 2160
       },
+      "fields": {
+        "title": "卡片指标（显示与顺序）",
+        "type": "array",
+        "description": "按显示顺序列出卡片指标。第 1 项是卡片主数字（账户余额/应交电费），第 2 项与其并列（默认本月预估电费），其余进入下方网格。不想要的指标删除该行即可；上下调整行顺序即改变显示位置。",
+        "default": [
+          { "key": "balance" },
+          { "key": "monthEstimateCharge" },
+          { "key": "currentMonthUsage" },
+          { "key": "latestDailyUsage" },
+          { "key": "latestMonthUsage" },
+          { "key": "currentYearUsage" },
+          { "key": "currentYearCharge" },
+          { "key": "latestMonthCharge" }
+        ],
+        "items": {
+          "type": "object",
+          "title": "指标",
+          "properties": {
+            "key": {
+              "title": "指标",
+              "type": "string",
+              "oneOf": [
+                { "title": "账户余额 / 应交电费", "enum": ["balance"] },
+                { "title": "本月预估电费", "enum": ["monthEstimateCharge"] },
+                { "title": "当月用电", "enum": ["currentMonthUsage"] },
+                { "title": "上日用电", "enum": ["latestDailyUsage"] },
+                { "title": "上月用电", "enum": ["latestMonthUsage"] },
+                { "title": "年累计用电", "enum": ["currentYearUsage"] },
+                { "title": "年累计电费", "enum": ["currentYearCharge"] },
+                { "title": "上月电费", "enum": ["latestMonthCharge"] }
+              ]
+            }
+          }
+        }
+      },
       "accounts": {
         "title": "户号",
         "type": "array",
@@ -95,6 +130,7 @@
     "theme",
     "snapshotWidth",
     "snapshotHeight",
+    "fields",
     "accounts"
   ]
 }

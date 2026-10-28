@@ -5,7 +5,7 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { renderCompactCard, renderDetailCard, type CardData } from '../src/renderer/card-svg.js';
+import { renderCard, renderCompactCard, renderDetailCard, type CardData } from '../src/renderer/card-svg.js';
 import { fallbackCardSvg, renderJpeg, renderPng } from '../src/renderer/image-renderer.js';
 
 const base: CardData = {
@@ -51,8 +51,8 @@ describe('卡片 SVG', () => {
       latestDailyUsage: undefined,
       monthEstimateCharge: undefined,
     });
-    expect(svg).toContain('暂无数据');
-    expect(svg).not.toContain('0.00');
+    expect(svg).toContain('—');
+    expect(svg).not.toContain('¥0.00');
   });
 
   it('数据过期时显示未更新提示', () => {
@@ -60,12 +60,32 @@ describe('卡片 SVG', () => {
     expect(svg).toContain('数据未更新');
   });
 
-  it('详情版包含趋势标题与日期标签', () => {
+  it('默认展示全部 8 个字段标签', () => {
     const svg = renderDetailCard(base);
-    expect(svg).toContain('最近 7 日用电');
-    expect(svg).toContain('10/27');
-    expect(svg).toContain('年累计电费');
+    expect(svg).toContain('账户余额');
     expect(svg).toContain('本月预估电费');
+    expect(svg).toContain('当月用电');
+    expect(svg).toContain('上日用电');
+    expect(svg).toContain('上月用电');
+    expect(svg).toContain('年累计用电');
+    expect(svg).toContain('年累计电费');
+    expect(svg).toContain('上月电费');
+  });
+
+  it('字段可按配置裁剪', () => {
+    const svg = renderCard({
+      ...base,
+      fields: ['balance', 'currentYearCharge'],
+    });
+    expect(svg).toContain('年累计电费');
+    expect(svg).not.toContain('当月用电');
+    expect(svg).not.toContain('上日用电');
+  });
+
+  it('后付费户号主数字标题为应交电费', () => {
+    const svg = renderCard({ ...base, primaryValue: 168.57, primaryLabel: '应交电费' });
+    expect(svg).toContain('应交电费');
+    expect(svg).not.toContain('账户余额');
   });
 });
 

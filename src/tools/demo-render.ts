@@ -7,7 +7,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { renderCompactCard, renderDetailCard, type CardData } from '../renderer/card-svg.js';
+import { renderCard, renderCompactCard, renderDetailCard, type CardData } from '../renderer/card-svg.js';
 import { fallbackCardSvg, renderJpeg } from '../renderer/image-renderer.js';
 
 const now = Date.now();
@@ -52,6 +52,7 @@ async function main(): Promise<void> {
     ['compact-stale.jpg', renderJpeg(renderCompactCard({ ...stale, theme: 'light' }), { width: 1280 })],
     ['detail-light.jpg', renderJpeg(renderDetailCard({ ...base, theme: 'light' }), { width: 1920, quality: 90 })],
     ['detail-dark.jpg', renderJpeg(renderDetailCard({ ...base, theme: 'dark' }), { width: 1920, quality: 90 })],
+    ['custom-fields.jpg', renderJpeg(renderCard({ ...base, theme: 'light', fields: ['balance', 'currentMonthUsage', 'currentYearCharge'] }), { width: 1280 })],
     ['fallback.jpg', renderJpeg(fallbackCardSvg(1280, 720, '数据获取失败 · 最近成功 10月27日 12:00'), { width: 1280 })],
     ['compact-thumb.jpg', renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 360 })],
   ];

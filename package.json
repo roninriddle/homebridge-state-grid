@@ -1,6 +1,6 @@
 {
   "name": "homebridge-state-grid",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "国家电网「网上国网」用电数据 Homebridge 插件，以虚拟摄像头卡片形式展示在 Apple 家庭",
   "author": {
     "name": "roninriddle",

@@ -26,7 +26,8 @@ import {
   type PowerAccount,
 } from './sgcc/types.js';
 import { StateGridClient } from './sgcc/client.js';
-import { renderCompactCard, renderDetailCard, type CardData } from './renderer/card-svg.js';
+import { renderCard, type CardData } from './renderer/card-svg.js';
+import { normalizeFieldOrder, type FieldKey } from './renderer/fields.js';
 import { fallbackCardSvg, pngToJpeg, renderPng } from './renderer/image-renderer.js';
 import { UsageCamera } from './camera/camera-accessory.js';
 import { PluginStore } from './services/store.js';
@@ -50,6 +51,8 @@ export interface StateGridConfig extends PlatformConfig {
   snapshotWidth?: number;
   snapshotHeight?: number;
   accounts?: AccountConfig[];
+  /** 卡片指标显示与顺序（key 数组或 [{key}] 数组）。 */
+  fields?: Array<FieldKey | { key: FieldKey }>;
 }
 
 interface CameraEntry {
@@ -142,6 +145,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
   private get theme(): 'light' | 'dark' {
     return this.config.theme ?? 'light';
+  }
+
+  private get fields(): FieldKey[] {
+    return normalizeFieldOrder(this.config.fields);
   }
 
   private get intervalHours(): number {
@@ -345,11 +352,12 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       currentYearCharge: entry.snapshot.currentYearCharge,
       dailySeries: entry.snapshot.dailySeries,
       updatedAt: entry.snapshot.updatedAt,
+      fields: this.fields,
       theme: this.theme,
       staleNote: stale ? `数据未更新 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : undefined,
     };
     try {
-      const png = renderPng(renderCompactCard(card), { width: this.width });
+      const png = renderPng(renderCard(card), { width: this.width });
       entry.png = png;
       entry.jpeg = await pngToJpeg(png, { width: this.width, quality: 88 });
     } catch (error) {
@@ -401,9 +409,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       currentYearCharge: snapshot.currentYearCharge,
       dailySeries: snapshot.dailySeries,
       updatedAt: snapshot.updatedAt,
+      fields: this.fields,
       theme: this.theme,
     };
-    return pngToJpeg(renderPng(renderDetailCard(card), { width: 1920 }), { quality: 90 });
+    return pngToJpeg(renderPng(renderCard(card), { width: 1920 }), { quality: 90 });
   }
 
   private ensureEntry(account: PowerAccount): CameraEntry {

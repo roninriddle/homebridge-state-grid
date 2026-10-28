@@ -58,7 +58,6 @@ class StreamSession {
     this.socket = socket;
 
     const args = [
-      '-re',
       '-loop', '1',
       '-framerate', String(FRAME_RATE),
       '-i', imagePath,
@@ -70,8 +69,9 @@ class StreamSession {
       '-profile:v', 'baseline',
       '-level', '3.1',
       '-s', `${width}x${height}`,
-      '-g', String(FRAME_RATE * 2),
-      '-x264-params', 'repeat-headers=1:keyint=2',
+      '-r', String(FRAME_RATE),
+      '-g', String(FRAME_RATE),
+      '-x264-params', `repeat-headers=1:keyint=${FRAME_RATE}`,
       '-f', 'h264',
       '-',
     ];
