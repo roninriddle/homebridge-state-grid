@@ -93,6 +93,14 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
+/** 日用电的 `day` 字段可能是 `20261029`（YYYYMMDD）或 `2026-10-29`，统一成 `YYYY-MM-DD`。 */
+function normalizeApiDate(value: string): string {
+  const text = value.trim();
+  const compact = /^(\d{4})(\d{2})(\d{2})$/.exec(text);
+  if (compact) return `${compact[1]}-${compact[2]}-${compact[3]}`;
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : '';
+}
+
 export class StateGridClient {
   private profile: DeviceProfile;
   private session: LoginSession | null;
@@ -437,8 +445,8 @@ export class StateGridClient {
     for (const item of raw) {
       const record = asRecord(item);
       if (!record) continue;
-      const date = String(record.day ?? record.ymd ?? '');
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+      const date = normalizeApiDate(String(record.day ?? record.ymd ?? ''));
+      if (!date) continue;
       readings.push({
         date,
         usage: numberOrUndefined(record.dayElePq),
@@ -467,8 +475,12 @@ export class StateGridClient {
       if (!/^\d{4}-\d{2}$/.test(month)) continue;
       bills.push({
         month,
-        usage: numberOrUndefined(record.pq ?? record.elePq ?? record.usage),
-        charge: numberOrUndefined(record.amt ?? record.charge ?? record.sumMoney),
+        usage: numberOrUndefined(
+          record.monthPq ?? record.monthEleNum ?? record.pq ?? record.elePq ?? record.usage,
+        ),
+        charge: numberOrUndefined(
+          record.monthAmt ?? record.monthEleCost ?? record.amt ?? record.charge ?? record.sumMoney,
+        ),
       });
     }
     return bills.sort((a, b) => a.month.localeCompare(b.month));
@@ -484,10 +496,18 @@ export class StateGridClient {
     if (!Array.isArray(data.list)) return null;
     const record = asRecord(data.list.find((item) => asRecord(item)));
     if (!record) return null;
+    const sumMoney = numberOrUndefined(record.sumMoney);
+    const prepay =
+      numberOrUndefined(record.prepayBal) ??
+      numberOrUndefined(record.prepayBalance) ??
+      numberOrUndefined(record.accountBalance);
+    // 有预存余额（prepayBal/accountBalance > 0）视为预付费户号：sumMoney 即剩余可用余额；
+    // 否则是后付费户号，sumMoney 是应交电费。
+    const prepaid = (prepay ?? 0) > 0;
     return {
       consType: String(record.consType ?? ''),
-      balance: numberOrUndefined(record.prepayBalance) ?? numberOrUndefined(record.accountBalance),
-      amountDue: numberOrUndefined(record.sumMoney),
+      balance: prepaid ? sumMoney : undefined,
+      amountDue: prepaid ? undefined : sumMoney,
       historyOwe: numberOrUndefined(record.historyOwe),
       date: String(record.date ?? ''),
     };

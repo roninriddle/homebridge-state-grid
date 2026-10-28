@@ -79,6 +79,14 @@ function cleanAccessoryName(name: string): string {
   return Array.from(cleaned).length >= 2 ? cleaned : '';
 }
 
+/** 从脱敏地址提取地区（省/市/区），去掉 `*` 及之后的详细地址与省级前缀。 */
+function regionFromAddress(address: string): string {
+  const region = (address || '').split('*')[0].trim();
+  if (!region) return '';
+  // 去掉省级前缀（如"河北省"→"石家庄市裕华区"）；直辖市（"北京市"）不含"省"，原样保留。
+  return region.replace(/^[\u4e00-\u9fa5]{1,3}省/, '').trim();
+}
+
 export class StateGridPlatform implements DynamicPlatformPlugin {
   private readonly entries = new Map<string, CameraEntry>();
   private client: StateGridClient | null = null;
@@ -292,10 +300,9 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     const match = this.configFor(account);
     const configured = match?.title?.trim();
     if (configured) return configured;
-    // 国网返回的是脱敏姓名（如 *博帆），星号会让 HomeKit 拒绝注册配件，
-    // 去掉首尾星号；若去完为空则退回「用电 + 户号后 4 位」。
-    const cleanName = cleanAccessoryName(account.name || '');
-    if (cleanName) return cleanName;
+    // 户号名称只显示地区，不暴露脱敏真实姓名。
+    const region = regionFromAddress(account.address || '');
+    if (region) return region;
     return `用电 ${account.consNoSrc.slice(-4)}`;
   }
 
