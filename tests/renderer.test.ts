@@ -64,7 +64,8 @@ describe('卡片 SVG', () => {
     const svg = renderDetailCard(base);
     expect(svg).toContain('最近 7 日用电');
     expect(svg).toContain('10/27');
-    expect(svg).toContain('本年累计电费');
+    expect(svg).toContain('年累计电费');
+    expect(svg).toContain('本月预估电费');
   });
 });
 

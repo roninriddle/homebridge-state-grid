@@ -257,14 +257,15 @@ export function renderDetailCard(data: CardData): string {
 
   const statusText = data.staleNote ?? `更新 ${formatClock(data.updatedAt)}`;
 
+  // 对齐「网上国网」用电总览的 6 项指标：当月用电 / 日用电 / 年累计用电 /
+  // 年累计电费 / 上月用电 / 上月电费（本月预估电费放在顶部主数字旁）。
   const blocks = [
-    { label: '本月用电', value: formatUsage(data.currentMonthUsage), unit: 'kWh' },
-    { label: '本月电费', value: formatMoney(data.monthEstimateCharge), unit: '元', estimated: true },
-    { label: '最近一日', value: formatUsage(data.latestDailyUsage), unit: 'kWh' },
+    { label: '当月用电', value: formatUsage(data.currentMonthUsage), unit: 'kWh' },
+    { label: '日用电', value: formatUsage(data.latestDailyUsage), unit: 'kWh' },
+    { label: '年累计用电', value: formatUsage(data.currentYearUsage), unit: 'kWh' },
+    { label: '年累计电费', value: formatMoney(data.currentYearCharge), unit: '元' },
     { label: '上月用电', value: formatUsage(data.latestMonthUsage), unit: 'kWh' },
     { label: '上月电费', value: formatMoney(data.latestMonthCharge), unit: '元' },
-    { label: '本年累计用电', value: formatUsage(data.currentYearUsage), unit: 'kWh' },
-    { label: '本年累计电费', value: formatMoney(data.currentYearCharge), unit: '元' },
   ].filter((block) => block.value !== '—');
 
   const columns = 3;
@@ -284,7 +285,6 @@ export function renderDetailCard(data: CardData): string {
         block.value,
         block.unit,
         p,
-        block.estimated,
       );
     })
     .join('');
@@ -294,11 +294,22 @@ export function renderDetailCard(data: CardData): string {
   const chartY = divider3 + 70;
   const chartHeight = bottom - chartY;
 
+  const midX = innerX + innerW / 2;
+
+  // 顶部主数字区：左侧账户余额/应交电费，右侧并列「本月预估电费」。
+  const estimateMarkup =
+    data.monthEstimateCharge === undefined
+      ? ''
+      : `<g>${text(midX, 254, '¥', 40, p.secondary, 400)}${text(midX + 44, 306, formatMoney(data.monthEstimateCharge), 96, p.text, 600)}${text(midX, 360, '本月预估电费', 30, p.secondary, 400)}</g>`;
+
   const primaryMarkup =
     data.primaryValue === undefined
       ? text(innerX, 300, '暂无数据', 96, p.secondary, 600) +
         text(innerX, 360, data.primaryLabel, 30, p.secondary, 400)
-      : `<g>${text(innerX, 254, '¥', 48, p.secondary, 400)}${text(innerX + 52, 306, formatMoney(data.primaryValue), 132, p.text, 600)}${text(innerX, 360, data.primaryLabel, 30, p.secondary, 400)}</g>`;
+      : `<g>${text(innerX, 254, '¥', 48, p.secondary, 400)}${text(innerX + 52, 306, formatMoney(data.primaryValue), 132, p.text, 600)}${text(innerX, 360, data.primaryLabel, 30, p.secondary, 400)}</g>` +
+        (estimateMarkup
+          ? `<line x1="${midX - 48}" y1="214" x2="${midX - 48}" y2="366" stroke="${p.divider}" stroke-width="1"/>${estimateMarkup}`
+          : '');
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
 <rect width="${width}" height="${height}" fill="${p.bg}"/>
