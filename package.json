@@ -1,8 +1,20 @@
 {
   "name": "homebridge-state-grid",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "国家电网「网上国网」用电数据 Homebridge 插件，以虚拟摄像头卡片形式展示在 Apple 家庭",
+  "author": {
+    "name": "roninriddle",
+    "url": "https://github.com/roninriddle"
+  },
   "license": "MIT",
+  "homepage": "https://github.com/roninriddle/homebridge-state-grid#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/roninriddle/homebridge-state-grid.git"
+  },
+  "bugs": {
+    "url": "https://github.com/roninriddle/homebridge-state-grid/issues"
+  },
   "main": "dist/index.js",
   "engines": {
     "node": ">=22.0.0",

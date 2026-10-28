@@ -2,6 +2,7 @@
   "pluginAlias": "StateGrid",
   "pluginType": "platform",
   "singular": true,
+  "customUi": true,
   "headerDisplay": "把「网上国网」的用电数据以摄像头卡片的形式显示在 Apple 家庭。插件直接调用国家电网 App 接口，不需要 Home Assistant、Python 或额外容器。",
   "footerDisplay": "非官方插件，依赖网上国网 App 的非公开接口，服务端升级后可能暂时失效。请勿用于计费或结算。",
   "schema": {

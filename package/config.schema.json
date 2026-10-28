@@ -1,0 +1,100 @@
+{
+  "pluginAlias": "StateGrid",
+  "pluginType": "platform",
+  "singular": true,
+  "customUi": true,
+  "headerDisplay": "把「网上国网」的用电数据以摄像头卡片的形式显示在 Apple 家庭。插件直接调用国家电网 App 接口，不需要 Home Assistant、Python 或额外容器。",
+  "footerDisplay": "非官方插件，依赖网上国网 App 的非公开接口，服务端升级后可能暂时失效。请勿用于计费或结算。",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "title": "名称",
+        "type": "string",
+        "default": "国家电网",
+        "description": "在 Homebridge 日志里显示的平台名称。"
+      },
+      "username": {
+        "title": "手机号",
+        "type": "string",
+        "description": "网上国网登录手机号。"
+      },
+      "password": {
+        "title": "密码",
+        "type": "string",
+        "x-schema-form": {
+          "type": "password"
+        },
+        "description": "留空则使用首次登录时保存的凭据。凭据会以加密方式保存在插件私有目录，不写入 config.json 的备份里。"
+      },
+      "updateIntervalHours": {
+        "title": "更新间隔（小时）",
+        "type": "integer",
+        "default": 12,
+        "minimum": 6,
+        "maximum": 24,
+        "description": "国家电网的日用电数据本身是延迟发布的，查询过于频繁没有意义，也更容易触发风控。"
+      },
+      "theme": {
+        "title": "卡片主题",
+        "type": "string",
+        "default": "light",
+        "oneOf": [
+          { "title": "浅色", "enum": ["light"] },
+          { "title": "深色", "enum": ["dark"] }
+        ]
+      },
+      "snapshotWidth": {
+        "title": "卡片宽度（像素）",
+        "type": "integer",
+        "default": 1280,
+        "minimum": 640,
+        "maximum": 3840,
+        "description": "HomeKit 快照的渲染宽度。1280 足够清晰，加大只会增加渲染耗时。"
+      },
+      "snapshotHeight": {
+        "title": "卡片高度（像素）",
+        "type": "integer",
+        "default": 720,
+        "minimum": 360,
+        "maximum": 2160
+      },
+      "accounts": {
+        "title": "户号",
+        "type": "array",
+        "description": "留空则自动为账号下所有户号创建卡片。",
+        "items": {
+          "type": "object",
+          "properties": {
+            "consNo": {
+              "title": "户号",
+              "type": "string",
+              "description": "网上国网里的用电户号（未加密形式）。"
+            },
+            "title": {
+              "title": "显示名称",
+              "type": "string",
+              "description": "例如「家庭用电」「父母家」。会作为摄像头名称出现在家庭 App。"
+            },
+            "enabled": {
+              "title": "启用",
+              "type": "boolean",
+              "default": true
+            }
+          }
+        }
+      }
+    },
+    "required": ["username"]
+  },
+  "layout": [
+    "name",
+    "username",
+    "password",
+    "updateIntervalHours",
+    "theme",
+    "snapshotWidth",
+    "snapshotHeight",
+    "accounts"
+  ]
+}

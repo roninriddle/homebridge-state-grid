@@ -77,6 +77,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private client: StateGridClient | null = null;
   private store: PluginStore;
   private refreshTimer: NodeJS.Timeout | null = null;
+  /** 卡在"需要验证码"时，轮询磁盘 session 是否已被设置页更新。 */
+  private verifyPollTimer: NodeJS.Timeout | null = null;
   /** 需要人工处理的状态（短信验证 / 风控挑战），供 UI 读取。 */
   private readonly status: {
     state: 'starting' | 'ready' | 'needs_verification' | 'error';
@@ -146,6 +148,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       this.status.message = '需要短信验证码：请在插件设置页完成验证';
       this.log.warn(this.status.message);
       this.persistStatus();
+      this.startVerifyPolling();
       return;
     }
     if (error instanceof StateGridInteractiveChallengeRequired) {
@@ -159,6 +162,53 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.status.message = message;
     this.log.error(`国家电网数据获取失败：${message}`);
     this.persistStatus();
+  }
+
+  /**
+   * 卡在「需要短信验证码」时，轮询磁盘上的 session。
+   *
+   * 为什么需要：设置页跑在独立进程里，用户在那边完成验证码登录后会把 session
+   * 写到 session.json；本进程若不主动去看，就得等下一个更新周期（最长 24 小时）。
+   * 这里每 30 秒查一次 token 是否变了，一旦变了立即重建连接、拉户号、刷新卡片。
+   */
+  private startVerifyPolling(): void {
+    if (this.verifyPollTimer) return;
+    this.verifyPollTimer = setInterval(() => {
+      void this.tryRecoverFromVerification();
+    }, 30_000);
+    this.verifyPollTimer.unref?.();
+  }
+
+  private async tryRecoverFromVerification(): Promise<void> {
+    if (this.status.state !== 'needs_verification') {
+      this.stopVerifyPolling();
+      return;
+    }
+    const saved = this.store.loadSession();
+    const currentToken = this.client?.currentSession?.token ?? '';
+    if (!saved?.token || saved.token === currentToken) return;
+
+    this.log.info('检测到验证已完成，重新连接网上国网…');
+    this.stopVerifyPolling();
+    try {
+      // 直接走一遍 connect：它会从磁盘 loadSession 并 ensureLogin（session 未过期
+      // 就直接复用，不再触发验证），随后 refreshAll 拉户号、渲染卡片。
+      await this.connect();
+      await this.refreshAll();
+      this.status.state = 'ready';
+      this.status.message = '已连接网上国网';
+      this.status.updatedAt = Date.now();
+      this.scheduleRefresh();
+      this.persistStatus();
+      this.log.info('网上国网连接已恢复');
+    } catch (error) {
+      this.setError(error);
+    }
+  }
+
+  private stopVerifyPolling(): void {
+    if (this.verifyPollTimer) clearInterval(this.verifyPollTimer);
+    this.verifyPollTimer = null;
   }
 
   /** 组装设备档案并建立会话。 */

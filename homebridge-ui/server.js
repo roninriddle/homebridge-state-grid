@@ -23,10 +23,12 @@ class UiServer extends HomebridgePluginUiServer {
   constructor() {
     super();
 
+    // homebridgeStoragePath 是 HomebridgePluginUiServer 提供的字符串属性，
+    // 直接指向当前 Homebridge 实例的 storage 目录（通常是 ~/.homebridge）。
     const storagePath =
-      typeof this.homebridgeStoragePath === 'function'
-        ? this.homebridgeStoragePath()
-        : process.env.HOMEBRIDGE_STORAGE_PATH || path.join(os.homedir(), '.homebridge');
+      this.homebridgeStoragePath ||
+      process.env.HOMEBRIDGE_STORAGE_PATH ||
+      path.join(os.homedir(), '.homebridge');
 
     const gateway = new UiGateway(storagePath);
     registerRoutes(this, gateway);
