@@ -133,6 +133,20 @@ describe('设置页草稿预览', () => {
     expect(result.ok).toBe(true); expect(result.source).toBe('sample'); expect(result.image.startsWith('data:image/png;base64,')).toBe(true);
     expect(gateway.store.loadFields()).toBeNull(); expect(gateway.client).toBeNull(); expect(fetchSpy).not.toHaveBeenCalled();
   });
+  it('停用户号按当前已保存指标重绘预览，不复用旧图也不请求网络', () => {
+    const gateway = new UiGateway(storage());
+    const identity = {consNo: '001234567890', name: '示例户主', address: '示例地址', enabled: false, data: {consNo: '001234567890', balance: 12, latestMonthUsage: 34, dailySeries: [], updatedAt: Date.now()}};
+    gateway.store.saveAccountsCache({updatedAt: Date.now(), accounts: [identity]});
+    gateway.store.saveCachedPreview(identity.consNo, Buffer.from('old-preview'));
+    gateway.setFields(['balance', 'latestMonthUsage']);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const preview = gateway.cachedPreview(identity.consNo);
+    expect(preview.ok).toBe(true); expect(preview.image).toMatch(/^data:image\/png;base64,/);
+    expect(preview.fields).toEqual(['balance', 'latestMonthUsage']);
+    expect(gateway.store.loadVisibility()).toEqual({});
+    expect(gateway.store.loadAccountsCache().accounts[0].enabled).toBe(false);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
   it('保存零指标被明确拒绝', () => { const gateway = new UiGateway(storage()); expect(() => gateway.setFields([])).toThrow('至少保留'); });
   it('预览拒绝未知户号和路径穿越', () => { const gateway = new UiGateway(storage()); expect(gateway.previewDraft({consNo: '../secret'}).ok).toBe(false); expect(() => gateway.store.loadCachedPreview('../secret')).toThrow(); });
   it('运行状态取自主进程，而非 UI 自己的客户端', () => {
