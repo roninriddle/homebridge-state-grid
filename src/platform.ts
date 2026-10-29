@@ -31,7 +31,8 @@ import { renderCard, type CardData } from './renderer/card-svg.js';
 import { normalizeFieldOrder, type FieldKey } from './renderer/fields.js';
 import { fallbackCardSvg, pngToJpeg, renderPng } from './renderer/image-renderer.js';
 import { UsageCamera } from './camera/camera-accessory.js';
-import { PluginStore } from './services/store.js';
+import { PluginStore, atomicWrite } from './services/store.js';
+import { snapshotToCard, cachedSnapshot } from './services/card.js';
 import { assembleProfile } from './services/device-profile.js';
 import { formatClock } from './renderer/format.js';
 import {
@@ -74,6 +75,7 @@ interface CameraEntry {
   snapshot?: AccountSnapshot;
   lastSuccess?: number;
   lastError?: string;
+  cameraError?: (id: string) => void;
 }
 
 const DEFAULT_INTERVAL_HOURS = 12;
@@ -93,6 +95,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private readonly entries = new Map<string, CameraEntry>();
   private client: StateGridClient | null = null;
   private store: PluginStore;
+  private refreshInFlight: Promise<void> | null = null;
+  private retryTimer: NodeJS.Timeout | null = null;
+  private retryDelay = 60_000;
+  private stopped = false;
+  private verificationToken = '';
   private refreshTimer: NodeJS.Timeout | null = null;
   /** 卡在"需要验证码"时，轮询磁盘 session 是否已被设置页更新。 */
   private verifyPollTimer: NodeJS.Timeout | null = null;
@@ -164,15 +171,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private async bootstrap(): Promise<void> {
+    if (this.stopped) return;
     this.startConfigWatcher();
     try {
+      this.restoreCachedEntries();
       await this.connect();
       await this.refreshAll();
       this.scheduleRefresh();
-      this.status.state = 'ready';
-      this.status.message = '已连接网上国网';
-      this.status.updatedAt = Date.now();
-      this.persistStatus();
+      this.retryDelay = 60_000;
     } catch (error) {
       this.setError(error);
     }
@@ -194,6 +200,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       this.status.message = `需要完成安全校验（${(error as StateGridError).code}），请打开网上国网 App 处理`;
       this.log.warn(this.status.message);
       this.persistStatus();
+      this.startVerifyPolling();
       return;
     }
     // 密码登录被国网风控拒绝（典型如 RK007「密码过于简单」）时，让用户走
@@ -211,6 +218,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.status.message = message;
     this.log.error(`国家电网数据获取失败：${message}`);
     this.persistStatus();
+    if (!this.stopped && !this.retryTimer) {
+      this.retryTimer = setTimeout(() => { this.retryTimer = null; void this.bootstrap(); }, this.retryDelay);
+      this.retryTimer.unref?.();
+      this.retryDelay = Math.min(30 * 60_000, this.retryDelay * 2);
+    }
   }
 
   /**
@@ -222,6 +234,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
    */
   private startVerifyPolling(): void {
     if (this.verifyPollTimer) return;
+    this.verificationToken = this.store.loadSession()?.token ?? '';
     this.verifyPollTimer = setInterval(() => {
       void this.tryRecoverFromVerification();
     }, 30_000);
@@ -234,8 +247,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       return;
     }
     const saved = this.store.loadSession();
-    const currentToken = this.client?.currentSession?.token ?? '';
-    if (!saved?.token || saved.token === currentToken) return;
+    if (!saved?.token || saved.token === this.verificationToken || (saved.expiresAt !== 0 && saved.expiresAt <= Date.now())) return;
 
     this.log.info('检测到验证已完成，重新连接网上国网…');
     this.stopVerifyPolling();
@@ -244,12 +256,9 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       // 就直接复用，不再触发验证），随后 refreshAll 拉户号、渲染卡片。
       await this.connect();
       await this.refreshAll();
-      this.status.state = 'ready';
-      this.status.message = '已连接网上国网';
-      this.status.updatedAt = Date.now();
       this.scheduleRefresh();
       this.persistStatus();
-      this.log.info('网上国网连接已恢复');
+      this.log.info('验证恢复流程已完成，运行状态已更新');
     } catch (error) {
       this.setError(error);
     }
@@ -286,7 +295,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.lastFieldsRaw = raw;
     this.log.info('检测到卡片指标配置变化，重新渲染卡片…');
     for (const entry of this.entries.values()) {
-      if (entry.snapshot) void this.paint(entry);
+      if (entry.snapshot) void this.paint(entry).catch((error) => this.log.warn(`重新渲染失败：${(error as Error).message}`));
     }
   }
 
@@ -297,7 +306,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.lastVisibilityRaw = raw;
     if (!this.client?.currentSession) return;
     this.log.info('检测到户号开关变化，同步 HomeKit 配件…');
-    await this.refreshAll();
+    this.reconcileAccessories();
+    this.persistStatus();
   }
 
   /** 让 HomeKit 里挂着的配件与「启用」状态对齐。 */
@@ -353,11 +363,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
   /** 组装设备档案并建立会话。 */
   private async connect(): Promise<void> {
-    const username = this.config.username || this.store.loadAccount()?.username || '';
-    const password = this.config.password || this.store.loadPassword() || '';
-    if (!username || !password) {
-      throw new StateGridAuthenticationError('missing_credentials', '尚未配置手机号或密码');
-    }
+    const savedAccount = this.store.loadAccount();
+    const username = savedAccount?.username || this.config.username || '';
+    const password = this.store.loadPassword() || ((!savedAccount || savedAccount.username === this.config.username) ? this.config.password : '') || '';
+    if (!username) throw new StateGridAuthenticationError('missing_credentials', '尚未配置手机号');
 
     const assembled = assembleProfile(this.store);
     const device = assembled.device;
@@ -367,6 +376,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       username,
       password,
       session: this.store.loadSession(),
+      onSession: (session) => this.store.saveSession(session),
       profileProvider: () => {
         // 每次请求前取一次 token（4 小时缓存，过期才重新生成）。
         const refreshed = assembled.refresh();
@@ -387,6 +397,20 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     if (province && province !== device.provinceHeader) {
       device.provinceHeader = province;
       this.store.saveRegion(province);
+    }
+  }
+
+  private restoreCachedEntries(): void {
+    const cache = this.store.loadAccountsCache();
+    if (!cache) return;
+    for (const account of this.accounts()) {
+      if (!this.enabled(account) || this.entries.has(account.consNoSrc)) continue;
+      const saved = cache.accounts.find((item) => item.consNo === account.consNoSrc);
+      const entry = this.ensureEntry(account);
+      entry.snapshot = cachedSnapshot(saved?.data ?? saved?.snapshot);
+      entry.lastSuccess = saved?.lastSuccess ?? undefined;
+      entry.lastError = saved?.lastError ?? undefined;
+      if (entry.snapshot) void this.paint(entry).catch(() => undefined);
     }
   }
 
@@ -427,16 +451,24 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     return `用电 ${account.consNoSrc.slice(-4)}`;
   }
 
-  private async refreshAll(): Promise<void> {
+  private refreshAll(): Promise<void> {
+    if (this.refreshInFlight) return this.refreshInFlight;
+    this.refreshInFlight = this.doRefreshAll().finally(() => { this.refreshInFlight = null; });
+    return this.refreshInFlight;
+  }
+
+  private async doRefreshAll(): Promise<void> {
     if (!this.client) return;
     // 每次刷新前先对齐配件：停用的户号从 HomeKit 移除、启用的补上。
     this.reconcileAccessories();
     const accounts = this.accounts().filter((account) => this.enabled(account));
 
+    let successes = 0;
     for (const account of accounts) {
       const entry = this.entries.get(account.consNoSrc) ?? this.ensureEntry(account);
       try {
         const snapshot = await this.client.snapshot(account);
+        successes++;
         entry.snapshot = snapshot;
         entry.lastSuccess = Date.now();
         entry.lastError = undefined;
@@ -444,10 +476,20 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       } catch (error) {
         entry.lastError = error instanceof Error ? error.message : String(error);
         this.log.warn(`${entry.title} 数据刷新失败：${entry.lastError}`);
-        if (!entry.jpeg) await this.paintFallback(entry, '数据获取失败');
+        if (entry.snapshot) await this.paint(entry);
+        else await this.paintFallback(entry, '数据获取失败');
+        if (error instanceof StateGridAuthenticationError || error instanceof StateGridDeviceVerificationRequired || error instanceof StateGridInteractiveChallengeRequired) {
+          this.setError(error);
+          return;
+        }
       }
     }
+    this.status.state = successes || !accounts.length ? 'ready' : 'error';
+    this.status.message = successes === accounts.length ? '已连接网上国网' : `本次成功更新 ${successes}/${accounts.length} 个户号，失败数据已保留并标记`;
+    this.status.updatedAt = Date.now();
+    if (this.client.currentSession) this.store.saveSession(this.client.currentSession);
     this.persistStatus();
+    if (accounts.length && !successes) this.setError(new Error('本次所有户号更新失败，将退避重试'));
   }
 
   /**
@@ -458,8 +500,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
    */
   private persistAccountsCache(): void {
     try {
+      const previous = this.store.loadAccountsCache();
       const accounts = this.accounts().map((account) => {
         const entry = this.entries.get(account.consNoSrc);
+        const saved = previous?.accounts.find((item) => item.consNo === account.consNoSrc);
         return {
           consNo: account.consNoSrc,
           consNoMasked: maskConsNo(account.consNoSrc),
@@ -468,9 +512,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
           consType: account.consType || '',
           title: this.titleFor(account),
           enabled: this.enabled(account),
-          lastSuccess: entry?.lastSuccess ?? null,
+          lastSuccess: entry?.lastSuccess ?? saved?.lastSuccess ?? null,
           lastError: entry?.lastError ?? null,
-          snapshot: entry?.snapshot ? summarizeSnapshot(entry.snapshot) : null,
+          snapshot: entry?.snapshot ? summarizeSnapshot(entry.snapshot) : saved?.snapshot ?? null,
+          data: entry?.snapshot ?? saved?.data,
         };
       });
       this.store.saveAccountsCache({ updatedAt: Date.now(), accounts });
@@ -483,38 +528,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private async paint(entry: CameraEntry): Promise<void> {
     if (!entry.snapshot) return;
     const stale = entry.snapshot.updatedAt < Date.now() - STALE_AFTER_MS;
-    const card: CardData = {
-      title: entry.title,
-      primaryValue: entry.snapshot.balance ?? entry.snapshot.amountDue,
-      primaryLabel: entry.snapshot.balance !== undefined ? '账户余额' : '应交电费',
-      latestDailyUsage: entry.snapshot.latestDailyUsage,
-      latestDailyDate: entry.snapshot.latestDailyDate,
-      currentMonthUsage: entry.snapshot.currentMonthUsage,
-      monthEstimateCharge: estimateCharge(entry.snapshot),
-      latestMonthUsage: entry.snapshot.latestMonthUsage,
-      latestMonthCharge: entry.snapshot.latestMonthCharge,
-      currentYearUsage: entry.snapshot.currentYearUsage,
-      currentYearCharge: entry.snapshot.currentYearCharge,
-      latestPeakUsage: entry.snapshot.latestPeakUsage,
-      latestValleyUsage: entry.snapshot.latestValleyUsage,
-      latestFlatUsage: entry.snapshot.latestFlatUsage,
-      latestSharpUsage: entry.snapshot.latestSharpUsage,
-      monthPeakUsage: entry.snapshot.monthPeakUsage,
-      monthValleyUsage: entry.snapshot.monthValleyUsage,
-      monthFlatUsage: entry.snapshot.monthFlatUsage,
-      monthSharpUsage: entry.snapshot.monthSharpUsage,
-      ladderLevel: entry.snapshot.ladderLevel,
-      penalty: entry.snapshot.penalty,
-      historyOwe: entry.snapshot.historyOwe,
-      dailySeries: entry.snapshot.dailySeries,
-      updatedAt: entry.snapshot.updatedAt,
-      fields: this.fields,
-      theme: this.theme,
-      staleNote: stale ? `数据未更新 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : undefined,
-    };
+    const card = snapshotToCard(entry.snapshot, {
+      title: entry.title, fields: this.fields, theme: this.theme,
+      staleNote: entry.lastError ? `更新失败 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : stale ? `数据未更新 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : undefined,
+    });
     try {
       const png = renderPng(renderCard(card), { width: this.width });
       entry.png = png;
+      atomicWrite(join(this.store.frameDir(), `${entry.consNo}.png`), png);
       entry.jpeg = await pngToJpeg(png, { width: this.width, quality: 88 });
       // 落盘预览缓存：设置页读它渲染缩略图，避免每次打开都联网拉数据。
       try {
@@ -531,6 +552,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private async paintFallback(entry: CameraEntry, message: string): Promise<void> {
     const png = renderPng(fallbackCardSvg(this.width, this.height, message), { width: this.width });
     entry.png = png;
+    atomicWrite(join(this.store.frameDir(), `${entry.consNo}.png`), png);
     try {
       entry.jpeg = await pngToJpeg(png, { width: this.width });
     } catch (error) {
@@ -546,10 +568,9 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
    */
   private persistStatus(): void {
     try {
-      writeFileSync(
+      atomicWrite(
         join(this.store.cacheDir(), 'status.json'),
         `${JSON.stringify({ ...this.statusSnapshot(), intervalHours: this.intervalHours }, null, 2)}\n`,
-        { mode: 0o600 },
       );
     } catch (error) {
       this.log.debug(`写入状态文件失败：${(error as Error).message}`);
@@ -560,34 +581,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private async detailSnapshot(title: string, snapshot: AccountSnapshot): Promise<Buffer> {
-    const card: CardData = {
-      title,
-      primaryValue: snapshot.balance ?? snapshot.amountDue,
-      primaryLabel: snapshot.balance !== undefined ? '账户余额' : '应交电费',
-      latestDailyUsage: snapshot.latestDailyUsage,
-      latestDailyDate: snapshot.latestDailyDate,
-      currentMonthUsage: snapshot.currentMonthUsage,
-      monthEstimateCharge: estimateCharge(snapshot),
-      latestMonthUsage: snapshot.latestMonthUsage,
-      latestMonthCharge: snapshot.latestMonthCharge,
-      currentYearUsage: snapshot.currentYearUsage,
-      currentYearCharge: snapshot.currentYearCharge,
-      latestPeakUsage: snapshot.latestPeakUsage,
-      latestValleyUsage: snapshot.latestValleyUsage,
-      latestFlatUsage: snapshot.latestFlatUsage,
-      latestSharpUsage: snapshot.latestSharpUsage,
-      monthPeakUsage: snapshot.monthPeakUsage,
-      monthValleyUsage: snapshot.monthValleyUsage,
-      monthFlatUsage: snapshot.monthFlatUsage,
-      monthSharpUsage: snapshot.monthSharpUsage,
-      ladderLevel: snapshot.ladderLevel,
-      penalty: snapshot.penalty,
-      historyOwe: snapshot.historyOwe,
-      dailySeries: snapshot.dailySeries,
-      updatedAt: snapshot.updatedAt,
-      fields: this.fields,
-      theme: this.theme,
-    };
+    const card = snapshotToCard(snapshot, { title, fields: this.fields, theme: this.theme });
     return pngToJpeg(renderPng(renderCard(card), { width: 1920 }), { quality: 90 });
   }
 
@@ -616,6 +610,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
     entry.camera = new UsageCamera({
       name: title,
+      onStreamError: (id) => entry.cameraError?.(id),
       log: this.log,
       width: this.width,
       height: this.height,
@@ -623,6 +618,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       // HomeKit 快照：优先给缓存好的 JPEG，没有就现渲染一张。
       snapshot: async () => {
         const current = this.entries.get(entry.consNo);
+        if (current?.snapshot && (current.lastError || current.snapshot.updatedAt < Date.now() - STALE_AFTER_MS)) await this.paint(current);
         if (current?.jpeg) return current.jpeg;
         if (current?.png) {
           const png = current.png;
@@ -646,13 +642,18 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       },
       writeFrame: async (frame: Buffer) => {
         const file = join(this.store.frameDir(), `${entry.consNo}.png`);
-        writeFileSync(file, frame, { mode: 0o600 });
+        atomicWrite(file, frame);
         return file;
       },
     });
 
     this.entries.set(account.consNoSrc, entry);
     this.attachCameraController(accessory, entry);
+    const saved = this.store.loadAccountsCache()?.accounts.find((item) => item.consNo === entry.consNo);
+    entry.snapshot = cachedSnapshot(saved?.data ?? saved?.snapshot);
+    entry.lastSuccess = saved?.lastSuccess ?? undefined;
+    entry.lastError = saved?.lastError ?? undefined;
+    if (entry.snapshot) void this.paint(entry).catch(() => undefined);
 
     if (!cached) {
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
@@ -679,10 +680,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     }
 
     // sessionID -> prepareStream 阶段收到的连接信息。
-    const sessions = new Map<
-      string,
-      { address: string; videoPort: number; videoSrtpKey: Buffer; videoSrtpSalt: Buffer }
-    >();
+    const sessions = new Map<string, import('./camera/camera-accessory.js').CameraStreamRequest>();
 
     const delegate = {
       handleSnapshotRequest: (
@@ -698,49 +696,31 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
         })();
       },
       prepareStream: (request: any, callback: (error?: Error, response?: unknown) => void) => {
-        try {
-          const info = {
-            address: request.targetAddress,
-            videoPort: request.video.port,
-            videoSrtpKey: request.video.srtp_key,
-            videoSrtpSalt: request.video.srtp_salt,
-          };
-          sessions.set(request.sessionID, info);
-          const plan = entry.camera.prepareStream(info);
-          callback(undefined, {
-            video: {
-              port: plan.port,
-              ssrc: plan.ssrc,
-              srtp_key: plan.srtpKey,
-              srtp_salt: plan.srtpSalt,
-            },
-          });
-        } catch (error) {
-          callback(error as Error);
-        }
-      },
-      handleStreamRequest: (request: any, callback: () => void) => {
         void (async () => {
           try {
-            if (request.type === 'stop') {
-              entry.camera.stopStream();
-              callback();
-              return;
-            }
-            if (request.type === 'reconfigure') {
-              // 虚拟静态卡片：重配置只改变分辨率参数，无需重建 ffmpeg。
-              callback();
-              return;
-            }
+            const info = { sessionID: request.sessionID, address: request.targetAddress, videoPort: request.video.port, videoSrtpKey: request.video.srtp_key, videoSrtpSalt: request.video.srtp_salt };
+            sessions.set(request.sessionID, info);
+            const plan = await entry.camera.prepareStream(info);
+            callback(undefined, { video: { port: plan.port, ssrc: plan.ssrc, srtp_key: plan.srtpKey, srtp_salt: plan.srtpSalt } });
+          } catch (error) { sessions.delete(request.sessionID); callback(error as Error); }
+        })();
+      },
+      handleStreamRequest: (request: any, callback: (error?: Error) => void) => {
+        void (async () => {
+          try {
+            if (request.type === 'stop') { entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID); callback(); return; }
             const info = sessions.get(request.sessionID);
-            if (!info) {
-              throw new Error('找不到会话信息（session 未协商）');
-            }
-            await entry.camera.startStream(info);
+            if (!info) throw new Error('找不到视频协商会话');
+            const video = request.video || {};
+            const options = { ...info, payloadType: video.pt ?? info.payloadType, width: video.width ?? info.width, height: video.height ?? info.height, fps: video.fps ?? info.fps, bitrate: video.max_bit_rate ?? info.bitrate, mtu: video.mtu ?? info.mtu };
+            sessions.set(request.sessionID, options);
+            if (request.type === 'reconfigure') await entry.camera.reconfigure(request.sessionID, options);
+            else await entry.camera.startStream(options);
             callback();
           } catch (error) {
+            entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID);
             this.log.warn(`视频流启动失败：${(error as Error).message}`);
-            callback();
+            callback(error as Error);
           }
         })();
       },
@@ -766,6 +746,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       },
     });
 
+    entry.cameraError = (id: string) => { sessions.delete(id); controller.forceStopStreamingSession(id); };
     accessory.configureController(controller);
   }
 
@@ -781,6 +762,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private stop(): void {
+    this.stopped = true;
+    this.stopVerifyPolling();
+    if (this.retryTimer) clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = null;
     if (this.configWatcher) clearInterval(this.configWatcher);

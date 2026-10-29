@@ -16,9 +16,9 @@ import type { AccountSnapshot } from '../sgcc/types.js';
  */
 export function estimateCharge(snapshot: AccountSnapshot): number | undefined {
   const { latestMonthCharge, latestMonthUsage, currentMonthUsage } = snapshot;
-  if (!latestMonthCharge || !latestMonthUsage || !currentMonthUsage) return undefined;
+  if (latestMonthCharge === undefined || latestMonthUsage === undefined || currentMonthUsage === undefined || latestMonthUsage <= 0) return undefined;
   const unitPrice = latestMonthCharge / latestMonthUsage;
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return undefined;
+  if (!Number.isFinite(unitPrice) || unitPrice < 0) return undefined;
   return Math.round(currentMonthUsage * unitPrice * 100) / 100;
 }
 
@@ -32,6 +32,9 @@ export function summarizeSnapshot(snapshot: AccountSnapshot): Record<string, unk
     latestDailyUsage: snapshot.latestDailyUsage ?? null,
     latestDailyDate: snapshot.latestDailyDate ?? null,
     currentMonthUsage: snapshot.currentMonthUsage ?? null,
+    currentMonthThrough: snapshot.currentMonthThrough ?? null,
+    currentMonthPartial: snapshot.currentMonthPartial ?? null,
+    latestMonth: snapshot.latestMonth ?? null,
     latestMonthUsage: snapshot.latestMonthUsage ?? null,
     latestMonthCharge: snapshot.latestMonthCharge ?? null,
     currentYearUsage: snapshot.currentYearUsage ?? null,

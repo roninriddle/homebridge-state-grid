@@ -87,6 +87,8 @@ function registerRoutes(server, gateway) {
     safe(async (payload) => gateway.setFields(payload.fields)),
   );
 
+  server.onRequest('/preview-draft', safe(async (payload) => gateway.previewDraft(payload)));
+
   /** 单户号数据 + 卡片预览图。 */
   server.onRequest(
     '/preview',

@@ -103,6 +103,9 @@ export interface AccountSnapshot {
   /** 该数据所属日期（YYYY-MM-DD）。 */
   latestDailyDate?: string;
   currentMonthUsage?: number;
+  currentMonthThrough?: string;
+  currentMonthPartial?: boolean;
+  latestMonth?: string;
   latestMonthUsage?: number;
   latestMonthCharge?: number;
   currentYearUsage?: number;

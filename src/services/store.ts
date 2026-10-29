@@ -7,23 +7,23 @@
  *  - account.json：手机号与加密后的密码。
  *
  * 密码不落明文：用 AES-256-GCM 加密，密钥由「主机名 + 用户名 + 插件固定盐」
- * 派生。这不是硬件级保护（同机同用户可解），但能避免备份、日志、误传配置
- * 文件时的直接泄露，而且不依赖 keytar ——后者在 Docker 里通常不可用。
+ * 派生。这是明文遮蔽，不抵御已知主机名/用户名的离线恢复；
+ * 文件权限和备份访问控制仍须保护凭据。保留既有格式以兼容升级。
  */
 
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 
-import type { LoginSession } from '../sgcc/types.js';
+import type { LoginSession, AccountSnapshot } from '../sgcc/types.js';
 import {
   createProfileState,
   profileFromState,
   type ProfileState,
   type StableProfile,
 } from '../sgcc/turing-profile.js';
-import { generateDeviceToken, type DeviceToken } from '../sgcc/device-token.js';
+import { generateDeviceToken, TOKEN_SCHEMA_VERSION, type DeviceToken } from '../sgcc/device-token.js';
 
 const TOKEN_CACHE_MS = 4 * 3600 * 1000;
 const KDF_SALT = 'homebridge-state-grid:v1';
@@ -63,6 +63,7 @@ export interface CachedAccount {
   lastError: string | null;
   /** summarizeSnapshot 的产物；没拉到数据时为 null。 */
   snapshot: Record<string, unknown> | null;
+  data?: AccountSnapshot;
 }
 
 /** 户号缓存文件结构。 */
@@ -105,8 +106,18 @@ function readJson<T>(file: string): T | null {
   }
 }
 
+export function atomicWrite(file: string, value: string | Buffer): void {
+  const temporary = `${file}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
+  try {
+    writeFileSync(temporary, value, { mode: 0o600, flag: 'wx' });
+    renameSync(temporary, file);
+  } finally {
+    if (existsSync(temporary)) unlinkSync(temporary);
+  }
+}
+
 function writeJson(file: string, value: unknown): void {
-  writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  atomicWrite(file, `${JSON.stringify(value, null, 2)}\n`);
   try {
     chmodSync(file, 0o600);
   } catch {
@@ -133,19 +144,25 @@ export class PluginStore {
       try {
         return profileFromState(state.profile);
       } catch {
-        /* 结构不兼容时重建 */
+        throw new Error('设备档案不兼容，请保留 device.json 并从备份恢复，不能自动更换设备身份');
       }
     }
+    if (existsSync(this.deviceFile)) throw new Error('设备档案损坏，请保留 device.json 并从备份恢复');
     // 注意：必须写回同一份状态，否则内存里的种子和磁盘上的不是同一个。
     const fresh = createProfileState();
-    writeJson(this.deviceFile, { schemaVersion: 1, profile: fresh } satisfies DeviceState);
+    try {
+      writeFileSync(this.deviceFile, JSON.stringify({ schemaVersion: 1, profile: fresh }), { mode: 0o600, flag: 'wx' });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      return this.loadProfile();
+    }
     return profileFromState(fresh);
   }
 
   loadToken(profile: StableProfile): DeviceToken | null {
     const state = readJson<DeviceState>(this.deviceFile);
     const cache = state?.tokenCache;
-    if (!cache) return null;
+    if (!cache || cache.schemaVersion !== TOKEN_SCHEMA_VERSION) return null;
     if (Date.now() - cache.timestampMs > TOKEN_CACHE_MS) return null;
     if (cache.profileId !== profile.identity().profileId) return null;
     if (!cache.token?.startsWith('v3:')) return null;
@@ -166,11 +183,12 @@ export class PluginStore {
     if (cached) return cached;
     const generated = generateDeviceToken(profile);
     const state = readJson<DeviceState>(this.deviceFile);
+    if (!state?.profile) throw new Error('设备档案不可读，拒绝更换设备身份');
     writeJson(this.deviceFile, {
       schemaVersion: 1,
-      profile: state?.profile ?? createProfileState(),
+      profile: state.profile,
       tokenCache: {
-        schemaVersion: 6,
+        schemaVersion: TOKEN_SCHEMA_VERSION,
         token: generated.token,
         tokenTime: generated.tokenTime,
         timestampMs: generated.timestampMs,
@@ -184,13 +202,17 @@ export class PluginStore {
   }
 
   loadSession(): LoginSession | null {
-    const value = readJson<LoginSession>(join(this.dir, 'session.json'));
+    const value = readJson<LoginSession & { schemaVersion?: number }>(join(this.dir, 'session.json'));
     if (!value?.token) return null;
+    // 旧版只保存了本地猜测的 30 分钟，不能据此认定服务端 token 已过期。
+    // 迁移为未知有效期，由下一次正常业务请求验证，失败仍只重登一次。
+    if (!value.schemaVersion) value.expiresAt = 0;
+    value.userId = value.userId || String(value.userInfo?.userId || '0');
     return value;
   }
 
   saveSession(session: LoginSession): void {
-    writeJson(join(this.dir, 'session.json'), session);
+    writeJson(join(this.dir, 'session.json'), { ...session, schemaVersion: 2 });
   }
 
   clearSession(): void {
@@ -206,7 +228,7 @@ export class PluginStore {
     if (password) next.passwordEnc = encryptSecret(password);
     else {
       const previous = this.loadAccount();
-      if (previous?.passwordEnc) next.passwordEnc = previous.passwordEnc;
+      if (previous?.username === username && previous.passwordEnc) next.passwordEnc = previous.passwordEnc;
     }
     writeJson(join(this.dir, 'account.json'), next);
   }
@@ -254,6 +276,7 @@ export class PluginStore {
 
   /** 读取某户号的预览图缓存（JPEG），没有则返回 null。 */
   loadCachedPreview(consNo: string): Buffer | null {
+    this.validateConsNo(consNo);
     const file = join(this.previewDir(), `${consNo}.jpg`);
     if (!existsSync(file)) return null;
     try {
@@ -264,7 +287,16 @@ export class PluginStore {
   }
 
   saveCachedPreview(consNo: string, jpeg: Buffer): void {
-    writeFileSync(join(this.previewDir(), `${consNo}.jpg`), jpeg, { mode: 0o600 });
+    this.validateConsNo(consNo);
+    atomicWrite(join(this.previewDir(), `${consNo}.jpg`), jpeg);
+  }
+
+  private validateConsNo(consNo: string): void {
+    if (!/^[\w-]{1,128}$/.test(consNo)) throw new Error('无效户号');
+  }
+
+  loadRuntimeStatus(): Record<string, unknown> | null {
+    return readJson(join(this.cacheDir(), 'status.json'));
   }
 
   /** 户号显示开关（设置页「户号与卡片预览」里的启用/停用）。 */

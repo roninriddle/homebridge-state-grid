@@ -12,6 +12,7 @@
 'use strict';
 
 const path = require('node:path');
+const fs = require('node:fs');
 
 const DIST = path.join(__dirname, '..', '..', 'dist');
 
@@ -32,7 +33,8 @@ const { PluginStore } = loadDist('services/store.js');
 const { assembleProfile } = loadDist('services/device-profile.js');
 const { StateGridClient } = loadDist('sgcc/client.js');
 const { renderCompactCard } = loadDist('renderer/card-svg.js');
-const { renderJpeg } = loadDist('renderer/image-renderer.js');
+const { renderJpeg, renderPng } = loadDist('renderer/image-renderer.js');
+const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
 const {
   FIELD_KEYS,
   FIELD_META,
@@ -84,13 +86,14 @@ class UiGateway {
    * 服务端会接连下发两条短信验证。
    */
   ensureClient(credentials) {
+    if (credentials?.username && this.credentials?.username && credentials.username !== this.credentials.username) this.resetClient();
     if (this.client) return this.client;
 
     const account = this.store.loadAccount();
     const username = credentials?.username || account?.username || '';
     // 短信登录不需要密码，所以这里只强制要求手机号；密码登录（/login）在
     // 前端已经做了「手机号与密码都要填」的校验，这里留空密码也能安全地发短信。
-    const password = credentials?.password || this.store.loadPassword() || '';
+    const password = credentials?.password || (username === account?.username ? this.store.loadPassword() : '') || '';
     if (!username) {
       throw new Error('请先填写手机号');
     }
@@ -100,7 +103,8 @@ class UiGateway {
       profile: assembled.device,
       username,
       password,
-      session: this.store.loadSession(),
+      session: !account || account.username === username ? this.store.loadSession() : null,
+      onSession: (session) => this.store.saveSession(session),
       profileProvider: () => {
         const refreshed = assembled.refresh();
         return {
@@ -177,6 +181,7 @@ class UiGateway {
     try {
       const codeKey =
         kind === 'login' ? await client.sendLoginSms() : await client.sendDeviceVerificationSms();
+      this.persistCredentialsOnly();
       this.pending = { kind: kind === 'login' ? 'login' : 'device', codeKey, at: Date.now() };
       return { ok: true, codeKey };
     } catch (error) {
@@ -215,6 +220,7 @@ class UiGateway {
   status() {
     const account = this.store.loadAccount();
     const session = this.store.loadSession();
+    const runtime = this.store.loadRuntimeStatus();
     return {
       storagePath: this.storagePath,
       username: account && account.username ? maskPhone(account.username) : '',
@@ -222,7 +228,10 @@ class UiGateway {
       hasSession: Boolean(session && session.token),
       sessionExpiresAt: (session && session.expiresAt) || null,
       pending: this.pending ? { kind: this.pending.kind, sentAt: this.pending.at } : null,
-      connected: Boolean(this.client && this.client.currentSession),
+      connected: runtime?.state === 'ready',
+      runtimeState: runtime?.state ?? 'starting',
+      runtimeMessage: runtime?.message ?? '等待主进程启动',
+      build: '0.6.0-stability-preview-20261029',
     };
   }
 
@@ -254,6 +263,7 @@ class UiGateway {
 
   /** 读缓存里的单户号预览图（纯本地，不联网）。 */
   cachedPreview(consNo) {
+    if (!this.store.loadAccountsCache()?.accounts.some((a) => a.consNo === consNo)) return { ok: false, message: '户号不在缓存中' };
     const jpeg = this.store.loadCachedPreview(String(consNo));
     if (!jpeg) return { ok: false, reason: 'error', message: '暂无缓存预览' };
     return { ok: true, image: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
@@ -268,7 +278,7 @@ class UiGateway {
       name: account.name || '',
       address: account.address || '',
       consType: account.consType || '',
-      title: this.titleOf(account),
+      title: this.displayConfig().accounts?.find((a) => a.consNo === account.consNoSrc)?.title || this.titleOf(account),
       province: String((session && session.userInfo && session.userInfo.addressProvince) || ''),
       enabled: visibility[account.consNoSrc] !== false,
     }));
@@ -297,6 +307,7 @@ class UiGateway {
         lastSuccess: prev?.lastSuccess ?? null,
         lastError: prev?.lastError ?? null,
         snapshot: prev?.snapshot ?? null,
+        data: prev?.data,
       });
     }
     this.store.saveAccountsCache({ updatedAt: Date.now(), accounts: [...byConsNo.values()] });
@@ -308,7 +319,7 @@ class UiGateway {
     if (!cache || !Array.isArray(cache.accounts)) return;
     const accounts = cache.accounts.map((a) =>
       a.consNo === consNo
-        ? { ...a, snapshot: summarizeSnapshot(snapshot), lastSuccess: Date.now(), lastError: null }
+        ? { ...a, data: snapshot, snapshot: summarizeSnapshot(snapshot), lastSuccess: Date.now(), lastError: null }
         : a,
     );
     this.store.saveAccountsCache({ ...cache, accounts, updatedAt: Date.now() });
@@ -317,6 +328,7 @@ class UiGateway {
   /** 设置页切换某户号是否生成卡片。 */
   setAccountVisibility(consNo, enabled) {
     if (!consNo) return { ok: false, reason: 'error', message: '缺少户号' };
+    if (!this.store.loadAccountsCache()?.accounts.some((a) => a.consNo === consNo)) throw new Error('户号不在缓存中');
     this.store.setAccountVisibility(String(consNo), enabled !== false);
     return { ok: true };
   }
@@ -329,7 +341,7 @@ class UiGateway {
     const stored = this.store.loadFields();
     return {
       ok: true,
-      active: stored && stored.length ? normalizeFieldOrder(stored) : null,
+      active: normalizeFieldOrder(stored?.length ? stored : this.displayConfig().fields),
       catalog: FIELD_KEYS.map((key) => ({
         key,
         label: FIELD_META[key].label,
@@ -342,6 +354,7 @@ class UiGateway {
 
   /** 保存卡片指标配置（字段顺序 = 显示顺序，不在列表里 = 不显示）。 */
   setFields(fields) {
+    if (!Array.isArray(fields) || fields.length === 0) throw new Error('请至少保留一个指标');
     const valid = normalizeFieldOrder(fields);
     this.store.saveFields(valid);
     return { ok: true, fields: valid };
@@ -350,7 +363,40 @@ class UiGateway {
   /** 当前生效的字段顺序（设置页预览与主进程保持一致）。 */
   currentFields() {
     const stored = this.store.loadFields();
-    return stored && stored.length ? normalizeFieldOrder(stored) : undefined;
+    return normalizeFieldOrder(stored?.length ? stored : this.displayConfig().fields);
+  }
+
+  displayConfig() {
+    try {
+      const config = JSON.parse(fs.readFileSync(path.join(this.storagePath, 'config.json'), 'utf8'));
+      return (config.platforms || []).find((item) => item.platform === 'StateGrid') || {};
+    } catch { return {}; }
+  }
+
+  /** 草稿仅重绘本地缓存；绝不创建客户端或请求国网，也不改正式配置。 */
+  previewDraft(payload = {}) {
+    const config = this.displayConfig();
+    const accounts = this.store.loadAccountsCache()?.accounts || [];
+    const account = payload.consNo ? accounts.find((item) => item.consNo === payload.consNo) : accounts.find((item) => item.enabled && cachedSnapshot(item.data ?? item.snapshot)) || accounts.find((item) => item.enabled) || accounts[0];
+    if (payload.consNo && !account) return { ok: false, message: '户号不在缓存中' };
+    const snapshot = cachedSnapshot(account?.data ?? account?.snapshot);
+    const source = snapshot ? 'cache' : 'sample';
+    const data = snapshot || {
+      consNo: '', name: '模拟数据', balance: 123.45, latestDailyUsage: 6.28,
+      latestDailyDate: '2026-10-27', currentMonthUsage: 187.4,
+      latestMonth: '2026-09', latestMonthUsage: 302.1, latestMonthCharge: 158.9,
+      currentYearUsage: 2311.3, currentYearCharge: 1210.4, latestPeakUsage: 2.1,
+      latestValleyUsage: 3.2, latestFlatUsage: 0.98, latestSharpUsage: 0,
+      monthPeakUsage: 60, monthValleyUsage: 100, monthFlatUsage: 27.4,
+      ladderLevel: 1, penalty: 0, historyOwe: 0, dailySeries: [], updatedAt: Date.now(),
+    };
+    const fields = normalizeFieldOrder(payload.fields ?? this.currentFields());
+    const theme = payload.theme === 'dark' || payload.theme === 'light' ? payload.theme : config.theme || 'light';
+    const title = config.accounts?.find((item) => item.consNo === account?.consNo)?.title || account?.title || '家庭用电';
+    const staleNote = source === 'sample' ? '模拟数据 · 仅供排版预览' : account?.lastError ? '最近更新失败 · 显示缓存' : Date.now() - data.updatedAt > 26 * 3600000 ? '数据未更新 · 显示缓存' : undefined;
+    const png = renderPng(renderCompactCard(snapshotToCard(data, { title, fields, theme, staleNote })), { width: 960 });
+    return { ok: true, image: 'data:image/png;base64,' + png.toString('base64'), source, updatedAt: snapshot?.updatedAt ?? null, fields, theme,
+      accounts: accounts.map((a) => ({consNo: a.consNo, title: a.title || a.consNoMasked})), selected: account?.consNo ?? '' };
   }
 
   /**
@@ -365,35 +411,10 @@ class UiGateway {
     if (!account) return { ok: false, reason: 'error', message: '户号不在当前登录账号下' };
     try {
       const snapshot = await client.snapshot(account);
-      const theme = (options && options.theme) === 'dark' ? 'dark' : 'light';
-      const card = {
-        title: (options && options.title) || this.titleOf(account),
-        primaryValue: snapshot.balance !== undefined ? snapshot.balance : snapshot.amountDue,
-        primaryLabel: snapshot.balance !== undefined ? '账户余额' : '应交电费',
-        latestDailyUsage: snapshot.latestDailyUsage,
-        latestDailyDate: snapshot.latestDailyDate,
-        currentMonthUsage: snapshot.currentMonthUsage,
-        monthEstimateCharge: estimateCharge(snapshot),
-        latestMonthUsage: snapshot.latestMonthUsage,
-        latestMonthCharge: snapshot.latestMonthCharge,
-        currentYearUsage: snapshot.currentYearUsage,
-        currentYearCharge: snapshot.currentYearCharge,
-        latestPeakUsage: snapshot.latestPeakUsage,
-        latestValleyUsage: snapshot.latestValleyUsage,
-        latestFlatUsage: snapshot.latestFlatUsage,
-        latestSharpUsage: snapshot.latestSharpUsage,
-        monthPeakUsage: snapshot.monthPeakUsage,
-        monthValleyUsage: snapshot.monthValleyUsage,
-        monthFlatUsage: snapshot.monthFlatUsage,
-        monthSharpUsage: snapshot.monthSharpUsage,
-        ladderLevel: snapshot.ladderLevel,
-        penalty: snapshot.penalty,
-        historyOwe: snapshot.historyOwe,
-        dailySeries: snapshot.dailySeries,
-        updatedAt: snapshot.updatedAt,
-        fields: this.currentFields(),
-        theme,
-      };
+      const config = this.displayConfig();
+      const theme = options?.theme || config.theme || 'light';
+      const title = options?.title || config.accounts?.find((a) => a.consNo === consNo)?.title || this.titleOf(account);
+      const card = snapshotToCard(snapshot, { title, theme, fields: this.currentFields() });
       const jpeg = await renderJpeg(renderCompactCard(card), { width: 640, quality: 80 });
       // 回写缓存：预览图 + 快照摘要，供下次打开设置页离线展示。
       this.store.saveCachedPreview(account.consNoSrc, jpeg);

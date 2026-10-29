@@ -42,7 +42,7 @@ export function renderPng(svg: string, options: RenderOptions = {}): Buffer {
     fitTo: options.width ? { mode: 'width', value: options.width } : { mode: 'original' },
     font: {
       loadSystemFonts: true,
-      defaultFontFamily: options.fontFamily ?? 'PingFang SC',
+      defaultFontFamily: options.fontFamily ?? (process.platform === 'darwin' ? 'PingFang SC' : 'Noto Sans CJK SC'),
     },
     background: '#FFFFFF',
   });

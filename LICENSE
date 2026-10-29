@@ -40,8 +40,9 @@ SOFTWARE.
 - `src/sgcc/turing-profile.ts` —— 设备特征表与性能上下文（源自 `state_grid/turing/`）
 - `src/sgcc/login.ts`、`src/sgcc/payloads.ts` —— 登录与各接口请求体（源自 `state_grid/api.py`）
 
-上游另有 Fork <https://github.com/Ch1swill/hass-state-grid>，其差异仅为 `api.py`
-中三处字段名修正，已并入本项目的 `src/sgcc/payloads.ts`，故本项目不再单独引用该 Fork。
+相关实现亦参考 <https://github.com/Ch1swill/hass-state-grid>。
+本次对照版本中，stevenjoezhang 分支相较 Ch1swill 分支的 api.py 修正了两处
+历史接口 consNo 参数，以及顶层 code=0 错误判定；本项目沿用这些修正。
 
 本项目与「网上国网」、国家电网有限公司无任何关联，未获其授权或认可。
 使用时请遵守相关服务条款，仅限个人、非商业用途。

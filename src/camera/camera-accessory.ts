@@ -1,248 +1,167 @@
-/**
- * HomeKit 虚拟摄像头：把渲染好的用电卡片当作"摄像头画面"。
- *
- * 两件事必须同时成立，否则家庭 App 里体验会崩：
- *  1. 快照（handleSnapshotRequest）——首页缩略图用，必须永远返回一张 JPEG；
- *  2. 视频流（prepareStream/handleStreamRequest）——点开后不能黑屏，
- *     这里用 ffmpeg 把最新快照循环编码成低帧率 H.264 再打 SRTP 发出去。
- *
- * 只在有人真的点开时才启动 ffmpeg，断开立刻结束，避免长期占用 CPU。
- */
-
+/** HomeKit 协商与独立会话；H.264、SRTP 和 RTCP 交给 ffmpeg。 */
 import { createSocket, type Socket } from 'node:dgram';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import type { Logger } from 'homebridge';
 
-import { deriveSessionKeys, protectRtp, type SessionKeys } from './srtp.js';
-import { nalType, packetizeNal, splitNalUnits } from './rtp.js';
-
 export interface CameraStreamRequest {
+  sessionID?: string;
   address: string;
   videoPort: number;
   videoSrtpKey: Buffer;
   videoSrtpSalt: Buffer;
+  payloadType?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  bitrate?: number;
+  mtu?: number;
 }
-
 export interface StreamPlan {
   port: number;
   ssrc: number;
   srtpKey: Buffer;
   srtpSalt: Buffer;
 }
-
 const FRAME_RATE = 2;
 const PAYLOAD_TYPE = 99;
 const CLOCK_RATE = 90_000;
 
-class StreamSession {
-  private socket: Socket | null = null;
-  private ffmpeg: ChildProcess | null = null;
-  private sequence = 1;
-  private timestamp = 0;
-  private buffer: Buffer<ArrayBufferLike> = Buffer.alloc(0);
-  private sps: Buffer | null = null;
-  private pps: Buffer | null = null;
-  private stopped = false;
-
-  constructor(
-    private readonly request: CameraStreamRequest,
-    private readonly localPort: number,
-    private readonly ssrc: number,
-    private readonly keys: SessionKeys,
-    private readonly logger: Logger,
-  ) {}
-
-  start(imagePath: string, ffmpegPath: string, width: number, height: number): void {
-    const socket = createSocket('udp4');
-    socket.bind(this.localPort);
-    this.socket = socket;
-
-    const args = [
-      '-loop', '1',
-      '-framerate', String(FRAME_RATE),
-      '-i', imagePath,
-      '-an',
-      '-c:v', 'libx264',
-      '-preset', 'ultrafast',
-      '-tune', 'stillimage',
-      '-pix_fmt', 'yuv420p',
-      '-profile:v', 'baseline',
-      '-level', '3.1',
-      '-s', `${width}x${height}`,
-      '-r', String(FRAME_RATE),
-      '-g', String(FRAME_RATE),
-      '-x264-params', `repeat-headers=1:keyint=${FRAME_RATE}`,
-      '-f', 'h264',
-      '-',
-    ];
-
-    const ff = spawn(ffmpegPath, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    this.ffmpeg = ff;
-
-    ff.stdout?.on('data', (chunk: Buffer) => this.onData(chunk));
-    ff.stderr?.on('data', (chunk: Buffer) => {
-      this.logger.debug?.(`[ffmpeg] ${chunk.toString().slice(0, 200)}`);
-    });
-    ff.on('error', (error) => {
-      this.logger.error(`摄像头流启动失败：${error.message}`);
-      this.stop();
-    });
-    ff.on('exit', () => {
-      this.stop();
-    });
-  }
-
-  private onData(chunk: Buffer): void {
-    if (this.stopped) return;
-    this.buffer = Buffer.concat([this.buffer, chunk]);
-    const { nals, rest } = splitNalUnits(this.buffer);
-    this.buffer = rest;
-
-    for (const nal of nals) {
-      const type = nalType(nal);
-      if (type === 7) {
-        this.sps = nal;
-        continue;
-      }
-      if (type === 8) {
-        this.pps = nal;
-        continue;
-      }
-      if (type === 5) {
-        // IDR 前重发参数集，保证中途加入的 HomeKit 客户端也能解码。
-        if (this.sps) this.sendNal(this.sps, this.timestamp, false);
-        if (this.pps) this.sendNal(this.pps, this.timestamp, false);
-      }
-      if (type === 1 || type === 5) {
-        this.sendNal(nal, this.timestamp, true);
-        this.timestamp = (this.timestamp + CLOCK_RATE / FRAME_RATE) >>> 0;
-      } else {
-        this.sendNal(nal, this.timestamp, false);
-      }
-    }
-  }
-
-  private sendNal(nal: Buffer, timestamp: number, endOfFrame: boolean): void {
-    if (!this.socket || this.stopped) return;
-    const { packets, nextSequence } = packetizeNal(nal, {
-      payloadType: PAYLOAD_TYPE,
-      sequenceNumber: this.sequence,
-      timestamp,
-      ssrc: this.ssrc,
-    });
-    this.sequence = nextSequence;
-    packets.forEach((packet, index) => {
-      const isLast = index === packets.length - 1;
-      const protectedPacket = protectRtp(
-        { header: packet.header, payload: packet.payload },
-        this.keys,
-        this.ssrc,
-        this.sequence - packets.length + index,
-      );
-      // marker 位已经在头部里了；这里只负责把最后一包标出去以便日志排查。
-      this.socket?.send(
-        protectedPacket,
-        this.request.videoPort,
-        this.request.address,
-        (error) => {
-          if (error && isLast && endOfFrame) {
-            this.logger.debug?.(`发送视频包失败：${error.message}`);
-          }
-        },
-      );
-    });
-  }
-
-  stop(): void {
-    if (this.stopped) return;
-    this.stopped = true;
-    this.ffmpeg?.kill('SIGKILL');
-    this.ffmpeg = null;
-    try {
-      this.socket?.close();
-    } catch {
-      /* socket 可能已经关闭 */
-    }
-    this.socket = null;
-  }
+export function streamArguments(request: CameraStreamRequest, plan: StreamPlan, imagePath: string, width: number, height: number): string[] {
+  const host = isIP(request.address) === 6 ? '[' + request.address + ']' : request.address;
+  const fps = Math.max(1, Math.min(FRAME_RATE, request.fps ?? FRAME_RATE));
+  const bitrate = Math.max(64, Math.min(2000, request.bitrate ?? 300));
+  const key = Buffer.concat([plan.srtpKey, plan.srtpSalt]).toString('base64');
+  return [
+    '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:2', '-nostats',
+    '-re', '-loop', '1', '-framerate', String(fps), '-i', imagePath,
+    '-an', '-c:v', 'libx264', '-preset', 'ultrafast', '-tune', 'zerolatency',
+    '-pix_fmt', 'yuv420p', '-profile:v', 'baseline', '-level', '3.1',
+    '-s', String(request.width ?? width) + 'x' + String(request.height ?? height),
+    '-r', String(fps), '-g', String(Math.max(1, Math.round(fps))),
+    '-b:v', bitrate + 'k', '-maxrate', bitrate + 'k', '-bufsize', (bitrate * 2) + 'k',
+    '-payload_type', String(request.payloadType ?? PAYLOAD_TYPE),
+    '-ssrc', String(plan.ssrc), '-f', 'rtp',
+    '-srtp_out_suite', 'AES_CM_128_HMAC_SHA1_80', '-srtp_out_params', key,
+    'srtp://' + host + ':' + request.videoPort + '?rtcpport=' + request.videoPort + '&pkt_size=' + Math.max(256, Math.min(1316, request.mtu ?? 1316)),
+  ];
 }
-
+interface Session {
+  request: CameraStreamRequest;
+  plan: StreamPlan;
+  socket: Socket;
+  timer?: NodeJS.Timeout;
+  ffmpeg?: ChildProcess;
+  stopping?: boolean;
+  active?: boolean;
+}
 export interface CameraAccessoryOptions {
   name: string;
-  /** HomeKit 快照（JPEG），每次请求都现取，保证内容是最新的。 */
   snapshot: () => Promise<Buffer>;
-  /** ffmpeg 循环编码的输入帧（PNG），质量要求低，但必须与快照同源。 */
   frame: () => Promise<Buffer>;
-  /** 把输入帧写到磁盘，返回路径供 ffmpeg 读取。 */
   writeFrame: (frame: Buffer) => Promise<string>;
   ffmpegPath: string;
   width: number;
   height: number;
   log: Logger;
+  onStreamError?: (sessionID: string) => void;
 }
-
-/** 挂到 Accessory 上的摄像头控制器封装。 */
 export class UsageCamera {
-  private stream: StreamSession | null = null;
-  private plan: StreamPlan | null = null;
-
+  private readonly sessions = new Map<string, Session>();
   constructor(private readonly options: CameraAccessoryOptions) {}
+  snapshot(): Promise<Buffer> { return this.options.snapshot(); }
 
-  /** 供 hap 的 CameraController 调用。 */
-  async snapshot(): Promise<Buffer> {
+  async prepareStream(request: CameraStreamRequest): Promise<StreamPlan> {
+    const id = request.sessionID ?? 'legacy';
+    this.stopStream(id);
+    if (!isIP(request.address) || request.videoPort < 1 || request.videoPort > 65535 ||
+        request.videoSrtpKey.length !== 16 || request.videoSrtpSalt.length !== 14) throw new Error('无效的摄像头协商参数');
+    const socket = createSocket(isIP(request.address) === 6 ? 'udp6' : 'udp4');
+    await new Promise<void>((resolve, reject) => {
+      socket.once('error', reject);
+      socket.bind(0, () => { socket.removeListener('error', reject); resolve(); });
+    }).catch((error) => { socket.close(); throw error; });
+    const plan: StreamPlan = {
+      port: (socket.address() as {port: number}).port,
+      ssrc: randomBytes(4).readUInt32BE(0) & 0x7fffffff,
+      srtpKey: request.videoSrtpKey,
+      srtpSalt: request.videoSrtpSalt,
+    };
+    const session: Session = { request, plan, socket };
+    socket.on('error', () => this.failSession(id, '视频 UDP 连接异常'));
+    session.timer = setTimeout(() => this.stopStream(id), 30_000);
+    session.timer.unref?.();
+    this.sessions.set(id, session);
+    return plan;
+  }
+
+  async startStream(request: CameraStreamRequest): Promise<void> {
+    const id = request.sessionID ?? 'legacy';
+    const session = this.sessions.get(id);
+    if (!session) throw new Error('流未协商');
+    if (session.active) throw new Error('视频会话已经启动');
+    session.active = true;
+    clearTimeout(session.timer);
+    const merged = { ...session.request, ...request };
     try {
-      return await this.options.snapshot();
+      const frame = await this.options.frame();
+      const imagePath = await this.options.writeFrame(frame);
+      if (session.stopping) throw new Error('视频会话已停止');
+      await new Promise<void>((resolve, reject) => {
+        let ready = false;
+        const timer = setTimeout(() => {
+          reject(new Error('视频编码器启动超时'));
+          this.stopStream(id);
+        }, 8000);
+        timer.unref?.();
+        const ff = spawn(this.options.ffmpegPath, streamArguments(merged, session.plan, imagePath, this.options.width, this.options.height), { stdio: ['ignore', 'ignore', 'pipe'] });
+        session.ffmpeg = ff;
+        ff.stderr?.on('data', (chunk: Buffer) => {
+          if (/frame=\s*[1-9]/.test(chunk.toString())) {
+            ready = true;
+            clearTimeout(timer);
+            resolve();
+          }
+        });
+        ff.once('error', () => { clearTimeout(timer); reject(new Error('无法启动视频编码器')); this.failSession(id, '无法启动视频编码器'); });
+        ff.once('exit', () => {
+          clearTimeout(timer);
+          if (!ready) reject(new Error('视频编码器未能输出画面'));
+          if (!session.stopping) this.failSession(id, '视频编码器已退出');
+        });
+      });
     } catch (error) {
-      this.options.log.warn(
-        `快照渲染失败，返回占位图：${(error as Error).message}`,
-      );
+      this.stopStream(id);
       throw error;
     }
   }
 
-  prepareStream(request: CameraStreamRequest): StreamPlan {
-    const port = 20000 + Math.floor(Math.random() * 20000);
-    const ssrc = Math.floor(Math.random() * 0xffffffff);
-    this.plan = {
-      port,
-      ssrc,
-      srtpKey: request.videoSrtpKey,
-      srtpSalt: request.videoSrtpSalt,
-    };
-    return this.plan;
+  async reconfigure(sessionID: string, options: Partial<CameraStreamRequest>): Promise<void> {
+    const previous = this.sessions.get(sessionID);
+    if (!previous) throw new Error('找不到视频会话');
+    const request = { ...previous.request, ...options, sessionID };
+    await this.prepareStream(request);
+    await this.startStream(request);
   }
 
-  async startStream(request: CameraStreamRequest): Promise<void> {
-    if (!this.plan) throw new Error('流未协商');
-    const plan = this.plan;
-    this.stopStream();
-    const keys = deriveSessionKeys({
-      masterKey: plan.srtpKey,
-      masterSalt: plan.srtpSalt,
-    });
-    const session = new StreamSession(
-      request,
-      plan.port,
-      plan.ssrc,
-      keys,
-      this.options.log,
-    );
-    this.stream = session;
-
-    // 视频流用 PNG 帧即可：ffmpeg 反正要重新编码成 H.264，多转一次 JPEG 只是浪费。
-    const frame = await this.options.frame();
-    const imagePath = await this.options.writeFrame(frame);
-    session.start(imagePath, this.options.ffmpegPath, this.options.width, this.options.height);
+  private failSession(id: string, message: string): void {
+    const session = this.sessions.get(id);
+    if (!session || session.stopping) return;
+    this.options.log.warn(message);
+    this.stopStream(id);
+    this.options.onStreamError?.(id);
   }
 
-  stopStream(): void {
-    this.stream?.stop();
-    this.stream = null;
+  stopStream(sessionID?: string): void {
+    for (const [id, session] of this.sessions) {
+      if (sessionID !== undefined && sessionID !== id) continue;
+      session.stopping = true;
+      clearTimeout(session.timer);
+      session.ffmpeg?.kill('SIGKILL');
+      try { session.socket.close(); } catch { /* 已关闭 */ }
+      this.sessions.delete(id);
+    }
   }
 }
-
-export const CAMERA_CONSTANTS = {
-  FRAME_RATE,
-  PAYLOAD_TYPE,
-  CLOCK_RATE,
-};
+export const CAMERA_CONSTANTS = { FRAME_RATE, PAYLOAD_TYPE, CLOCK_RATE };

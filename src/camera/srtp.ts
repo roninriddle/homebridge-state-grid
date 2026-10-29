@@ -8,7 +8,7 @@
  * 只支持 AES_CM_128_HMAC_SHA1_80（HomeKit 摄像头唯一实用的套件）。
  */
 
-import { createCipheriv, createHmac } from 'node:crypto';
+import { createCipheriv, createHmac, timingSafeEqual } from 'node:crypto';
 
 const LABEL_RTP_ENCRYPTION = 0x00;
 const LABEL_RTP_AUTH = 0x01;
@@ -41,7 +41,8 @@ function deriveKey(
   masterSalt.copy(iv, 0, 0, 14);
   iv[7] ^= label;
 
-  const cipher = createCipheriv('aes-128-ecb', masterKey, null);
+  if (masterKey.length !== 16 || masterSalt.length !== 14) throw new Error('Invalid SRTP key/salt length');
+  const cipher = createCipheriv('aes-128-ctr', masterKey, iv);
   cipher.setAutoPadding(false);
   const zeros = Buffer.alloc(Math.ceil(length / 16) * 16);
   const stream = Buffer.concat([cipher.update(zeros), cipher.final()]);
@@ -62,7 +63,7 @@ export function deriveSessionKeys(keys: SrtpKeys): SessionKeys {
  * libsrtp 的做法（srtp.c `srtp_protect` + aes_icm.c `aes_icm_set_iv`）：
  *   nonce = [0(2B)] [SSRC(4B)] [ROC(4B)] [SEQ(2B)] [0(2B)]
  *   counter = salt XOR nonce
- * 本项目 key_derivation_rate = 0，ROC 恒为 0，因此：
+ * key_derivation_rate = 0 不影响序号回绕；ROC 从完整 packet index 推导：
  *   iv[0..4)  = salt[0..4)
  *   iv[4..8)  = salt[4..8)  XOR SSRC
  *   iv[8..12) = salt[8..12)（ROC=0）
@@ -73,6 +74,7 @@ function counterIv(sessionSalt: Buffer, ssrc: number, seq: number): Buffer {
   const iv = Buffer.alloc(16);
   sessionSalt.copy(iv, 0, 0, 14);
   iv.writeUInt32BE((iv.readUInt32BE(4) ^ (ssrc >>> 0)) >>> 0, 4);
+  iv.writeUInt32BE((iv.readUInt32BE(8) ^ Math.floor(seq / 65536)) >>> 0, 8);
   iv.writeUInt16BE((iv.readUInt16BE(12) ^ (seq & 0xffff)) & 0xffff, 12);
   return iv;
 }
@@ -86,8 +88,7 @@ export interface RtpPacket {
  * 加密并认证一个完整的 RTP 包。
  *
  * 注意 RTP 头部的 payload length 字段不参与加密，加密从载荷起始开始；
- * 认证覆盖「头部 + 加密后载荷 + ROC」（RFC 3711 4.2：M = Authenticated
- * Portion || ROC，ROC 为 4 字节大端，本项目恒为 0）。
+ * 认证覆盖「头部 + 加密后载荷 + ROC」（RFC 3711 4.2），ROC 为 4 字节大端。
  */
 export function protectRtp(
   packet: RtpPacket,
@@ -95,19 +96,17 @@ export function protectRtp(
   ssrc: number,
   seq: number,
 ): Buffer {
-  const padLength = (16 - (packet.payload.length % 16)) % 16;
-  const padded = Buffer.concat([packet.payload, Buffer.alloc(padLength)]);
-
   const cipher = createCipheriv(
     'aes-128-ctr',
     session.sessionKey,
     counterIv(session.sessionSalt, ssrc, seq),
   );
   cipher.setAutoPadding(false);
-  const encrypted = Buffer.concat([cipher.update(padded), cipher.final()]);
+  const encrypted = Buffer.concat([cipher.update(packet.payload), cipher.final()]);
 
   const out = Buffer.concat([packet.header, encrypted]);
   const roc = Buffer.alloc(4);
+  roc.writeUInt32BE(Math.floor(seq / 65536) >>> 0);
   const tag = createHmac('sha1', session.sessionAuthKey)
     .update(out)
     .update(roc)
@@ -127,12 +126,13 @@ export function unprotectRtp(
   const body = protectedPacket.subarray(0, protectedPacket.length - 10);
   const tag = protectedPacket.subarray(protectedPacket.length - 10);
   const roc = Buffer.alloc(4);
+  roc.writeUInt32BE(Math.floor(seq / 65536) >>> 0);
   const expected = createHmac('sha1', session.sessionAuthKey)
     .update(body)
     .update(roc)
     .digest()
     .subarray(0, 10);
-  if (!tag.equals(expected)) throw new Error('SRTP 认证标签不匹配');
+  if (tag.length !== expected.length || !timingSafeEqual(tag, expected)) throw new Error('SRTP 认证标签不匹配');
 
   const header = body.subarray(0, headerLength);
   const encrypted = body.subarray(headerLength);

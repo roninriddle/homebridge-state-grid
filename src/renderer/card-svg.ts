@@ -11,7 +11,7 @@
  * 缺数据的字段不隐藏，统一显示「—」，保证布局稳定。
  */
 
-import { escapeXml, formatClock, formatMoney, formatNumber, formatUsage } from './format.js';
+import { escapeXml, formatClock, formatDayMonth, formatMoney, formatNumber, formatUsage } from './format.js';
 import { DEFAULT_FIELD_ORDER, FIELD_META, type FieldKey, type FieldUnit } from './fields.js';
 
 export type CardTheme = 'light' | 'dark';
@@ -32,6 +32,9 @@ export interface CardData {
   latestDailyUsage?: number;
   latestDailyDate?: string;
   currentMonthUsage?: number;
+  currentMonthThrough?: string;
+  currentMonthPartial?: boolean;
+  latestMonth?: string;
   /** 本月电费估算，基于上月结算均价。 */
   monthEstimateCharge?: number;
   latestMonthUsage?: number;
@@ -158,7 +161,12 @@ function fieldValues(data: CardData): FieldValue[] {
   };
   return order.map((key) => {
     const meta = FIELD_META[key];
-    const label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
+    let label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
+    if (key === 'latestDailyUsage' && data.latestDailyDate) label = `用电 · ${formatDayMonth(data.latestDailyDate)}`;
+    if (key.startsWith('latest') && key.endsWith('Usage') && key !== 'latestMonthUsage' && key !== 'latestDailyUsage' && data.latestDailyDate) label = `${meta.label.replace('上日', '')} · ${formatDayMonth(data.latestDailyDate)}`;
+    if (key === 'currentMonthUsage' && data.currentMonthPartial) label = '当月已取电量 · 部分';
+    if ((key === 'latestMonthUsage' || key === 'latestMonthCharge') && data.latestMonth) label = `${data.latestMonth} ${key === 'latestMonthUsage' ? '用电' : '电费'}`;
+    if (key === 'ladderLevel') label = '最近账单阶梯';
     return { key, label, value: values[key], unit: meta.unit, estimated: meta.estimated };
   });
 }

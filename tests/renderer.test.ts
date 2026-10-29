@@ -65,7 +65,7 @@ describe('卡片 SVG', () => {
     expect(svg).toContain('账户余额');
     expect(svg).toContain('本月预估电费');
     expect(svg).toContain('当月用电');
-    expect(svg).toContain('上日用电');
+    expect(svg).toContain('用电 · 10月27日');
     expect(svg).toContain('上月用电');
     expect(svg).toContain('年累计用电');
     expect(svg).toContain('年累计电费');
@@ -97,9 +97,9 @@ describe('卡片 SVG', () => {
       ladderLevel: 2,
       penalty: 0,
     });
-    expect(svg).toContain('上日峰用电');
-    expect(svg).toContain('上日谷用电');
-    expect(svg).toContain('当前阶梯');
+    expect(svg).toContain('峰用电 · 10月27日');
+    expect(svg).toContain('谷用电 · 10月27日');
+    expect(svg).toContain('最近账单阶梯');
     expect(svg).toContain('违约金');
     expect(svg).toContain('档');
   });
