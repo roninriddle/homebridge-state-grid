@@ -232,7 +232,7 @@ class UiGateway {
       connected: runtime?.state === 'ready',
       runtimeState: runtime?.state ?? 'starting',
       runtimeMessage: runtime?.message ?? '等待主进程启动',
-      build: '0.7.0',
+      build: '0.7.1',
     };
   }
 
@@ -373,6 +373,13 @@ class UiGateway {
     } catch { return {}; }
   }
 
+  accountDetails(account) {
+    const name = account.name || '接口未提供户名';
+    const address = account.address || '接口未提供用电地址';
+    return {consNo: account.consNo, name, address, enabled: account.enabled !== false, consType: account.consType || '',
+      title: [name, address, account.consNo].join(' · ')};
+  }
+
   appearanceFor(consNo, address, config = this.displayConfig()) {
     return resolveAppearance(consNo, address || '', this.store.loadAppearance()[consNo], config);
   }
@@ -412,7 +419,7 @@ class UiGateway {
     const staleNote = source === 'sample' ? '模拟数据 · 仅供排版预览' : account?.lastError ? '最近更新失败 · 显示缓存' : Date.now() - data.updatedAt > 26 * 3600000 ? '数据未更新 · 显示缓存' : undefined;
     const png = renderPng(renderCompactCard(snapshotToCard(data, { title, region: appearance.region, fields, theme, staleNote })), { width: 960 });
     return { ok: true, image: 'data:image/png;base64,' + png.toString('base64'), source, updatedAt: snapshot?.updatedAt ?? null, fields, theme,
-      appearance, savedAppearance, accounts: accounts.map((a) => ({consNo: a.consNo, title: this.appearanceFor(a.consNo, a.address).name + ' · ' + a.consNoMasked})), selected: account?.consNo ?? '' };
+      appearance, savedAppearance, account: account ? this.accountDetails(account) : null, accounts: accounts.map((a) => this.accountDetails(a)), selected: account?.consNo ?? '' };
   }
 
   /**

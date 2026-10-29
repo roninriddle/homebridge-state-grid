@@ -114,6 +114,19 @@ describe('缓存和主进程恢复', () => {
 });
 
 describe('设置页草稿预览', () => {
+  it('户号选择展示接口户名、完整户号、地址和停用状态，摄像头名独立', () => {
+    const gateway = new UiGateway(storage());
+    const identity = {consNo: '001234567890', consNoMasked: '0012****7890', name: '示例户主', address: '示例省示例市测试区示例路1号', title: '国家电网', enabled: false};
+    gateway.store.saveAccountsCache({updatedAt: Date.now(), accounts: [identity]});
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const result = gateway.previewDraft({consNo: identity.consNo, fields: ['balance']});
+    expect(result.account).toMatchObject({consNo: identity.consNo, name: identity.name, address: identity.address, enabled: false});
+    expect(result.accounts[0].title).toBe([identity.name, identity.address, identity.consNo].join(' · '));
+    expect(result.accounts[0].title).not.toContain('****');
+    expect(result.appearance.name).toBe('国家电网');
+    expect(gateway.store.loadAccountsCache().accounts[0]).toEqual(identity);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
   it('模拟预览不联网、不保存草稿，不创建客户端', () => {
     const dir = storage(); const gateway = new UiGateway(dir); const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const result = gateway.previewDraft({fields: ['balance', 'currentMonthUsage'], theme: 'dark'});

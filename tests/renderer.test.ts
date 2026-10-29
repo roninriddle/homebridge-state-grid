@@ -5,7 +5,8 @@
 
 import { describe, it, expect } from 'vitest';
 
-import { renderCard, renderCompactCard, renderDetailCard, type CardData } from '../src/renderer/card-svg.js';
+import { metricLayout, renderCard, renderCompactCard, renderDetailCard, type CardData } from '../src/renderer/card-svg.js';
+import { FIELD_META, type FieldKey } from '../src/renderer/fields.js';
 import { fallbackCardSvg, renderJpeg, renderPng } from '../src/renderer/image-renderer.js';
 
 const base: CardData = {
@@ -86,6 +87,49 @@ describe('卡片 SVG', () => {
     const svg = renderCard({ ...base, primaryValue: 168.57, primaryLabel: '应交电费' });
     expect(svg).toContain('应交电费');
     expect(svg).not.toContain('账户余额');
+  });
+
+  it('实际账单月份不替换上月标签，预估不重复标注', () => {
+    const svg = renderCard({...base, latestMonth: '2026-09'});
+    expect(svg).toContain('上月用电');
+    expect(svg).toContain('上月电费');
+    expect(svg).not.toContain('2026年9月');
+    expect(svg).toContain('本月预估电费');
+    expect(svg).not.toContain('预估电费 · 估算');
+  });
+
+  it('1～17 个下方指标每行铺满，边界不溢出、占位不重叠', () => {
+    expect(metricLayout(0)).toEqual([]);
+    for (let count = 1; count <= 17; count++) {
+      const boxes = metricLayout(count);
+      expect(boxes).toHaveLength(count);
+      for (const box of boxes) {
+        expect(box.x).toBeGreaterThanOrEqual(80);
+        expect(box.x + box.width).toBeLessThanOrEqual(1200.001);
+        expect(box.y + box.height).toBeLessThanOrEqual(648.001);
+        const row = boxes.filter((item) => item.y === box.y);
+        expect(row[0].x).toBe(80);
+        expect(row.at(-1)!.x + row.at(-1)!.width).toBeCloseTo(1200);
+      }
+      for (let i = 1; i < boxes.length; i++) {
+        if (boxes[i].y === boxes[i - 1].y) expect(boxes[i].x).toBeGreaterThan(boxes[i - 1].x + boxes[i - 1].width);
+      }
+    }
+    expect(metricLayout(1)[0].valueSize).toBeGreaterThan(metricLayout(10)[0].valueSize);
+    expect(metricLayout(1)[0].width).toBeGreaterThan(metricLayout(10)[0].width);
+  });
+
+  it('删除指标后扩大排版，顶部两项始终比下方数字大', () => {
+    const keys = Object.keys(FIELD_META) as FieldKey[];
+    for (let count = 1; count <= keys.length; count++) {
+      const svg = renderCard({...base, fields: keys.slice(0, count)});
+      const sizes = [...svg.matchAll(/data-role="(hero|metric)"[^>]*data-value-size="([\d.]+)"/g)];
+      const heroes = sizes.filter((match) => match[1] === 'hero').map((match) => Number(match[2]));
+      const metrics = sizes.filter((match) => match[1] === 'metric').map((match) => Number(match[2]));
+      expect(heroes).toHaveLength(Math.min(count, 2));
+      expect(metrics).toHaveLength(Math.max(count - 2, 0));
+      for (const size of metrics) expect(size).toBeLessThan(Math.min(...heroes));
+    }
   });
 
   it('分时与阶梯字段可渲染', () => {
