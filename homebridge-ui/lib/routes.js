@@ -90,6 +90,8 @@ function registerRoutes(server, gateway) {
   server.onRequest('/appearance-save', safe(async (payload) => gateway.setAppearance(payload)));
 
   server.onRequest('/preview-draft', safe(async (payload) => gateway.previewDraft(payload)));
+  server.onRequest('/card-draft', safe(async (payload) => gateway.cardDraft(payload)));
+  server.onRequest('/card-apply', safe(async () => gateway.applyCardConfig()));
 
   /** 单户号数据 + 卡片预览图。 */
   server.onRequest(

@@ -166,6 +166,35 @@ describe('设置页草稿预览', () => {
 });
 
 
+describe('原生底部保存的配置导入', () => {
+  it('运行中读取底部保存的指标并重绘，无需重启或联网', async () => {
+    vi.useFakeTimers();
+    const dir = storage(); const p = platform(dir);
+    p.store.saveFields(['balance', 'currentMonthUsage']);
+    p.accounts = () => [];
+    const entry = {snapshot: {updatedAt: Date.now()}, camera: {stopStream: vi.fn()}};
+    p.entries.set('first', entry); p.paint = vi.fn().mockResolvedValue(undefined);
+    p.startConfigWatcher();
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({platforms: [{platform: 'StateGrid', cardSettings: {fields: ['balance'], appearance: {}}}]}));
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(p.store.loadFields()).toEqual(['balance']);
+    expect(p.paint).toHaveBeenCalledWith(entry); p.stop();
+  });
+  it('导入幂等，非法配置不产生部分写入且不击穿监听器', async () => {
+    vi.useFakeTimers();
+    const dir = storage(); const p = platform(dir);
+    p.store.saveFields(['balance', 'latestMonthUsage']);
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({platforms: [{platform: 'StateGrid', cardSettings: {fields: ['balance'], appearance: {first: {name: '自家用电', showRegion: false}}}}]}));
+    expect(p.store.applyCardConfig()).toBe(true); expect(p.store.applyCardConfig()).toBe(false);
+    expect(p.store.loadAppearance().first.name).toBe('自家用电');
+    writeFileSync(join(dir, 'config.json'), JSON.stringify({platforms: [{platform: 'StateGrid', cardSettings: {fields: ['latestMonthUsage'], appearance: {first: {name: '电', showRegion: false}}}}]}));
+    expect(() => p.startConfigWatcher()).not.toThrow();
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(p.store.loadFields()).toEqual(['balance']);
+    expect(p.store.loadAppearance().first.name).toBe('自家用电'); p.stop();
+  });
+});
+
 describe('摄像头名称与地区显示', () => {
   it('默认名称与户号、地址无关，地区默认隐藏', () => {
     expect(resolveAppearance('12345678', '河北省示例市测试区*', undefined)).toEqual({name: '国家电网', showRegion: false, region: undefined});

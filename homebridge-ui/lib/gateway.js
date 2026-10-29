@@ -35,6 +35,7 @@ const { StateGridClient } = loadDist('sgcc/client.js');
 const { renderCompactCard } = loadDist('renderer/card-svg.js');
 const { renderJpeg, renderPng } = loadDist('renderer/image-renderer.js');
 const { resolveAppearance } = loadDist('services/appearance.js');
+const { normalizeCardSettings } = loadDist('services/card-settings.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
 const {
   FIELD_KEYS,
@@ -344,6 +345,7 @@ class UiGateway {
    * 目录含 label/unit/estimated，供设置页渲染勾选列表（单一数据源，避免前后端漂移）。
    */
   fields() {
+    this.store.applyCardConfig();
     const stored = this.store.loadFields();
     return {
       ok: true,
@@ -368,6 +370,7 @@ class UiGateway {
 
   /** 当前生效的字段顺序（设置页预览与主进程保持一致）。 */
   currentFields() {
+    this.store.applyCardConfig();
     const stored = this.store.loadFields();
     return normalizeFieldOrder(stored?.length ? stored : this.displayConfig().fields);
   }
@@ -387,7 +390,20 @@ class UiGateway {
   }
 
   appearanceFor(consNo, address, config = this.displayConfig()) {
+    this.store.applyCardConfig();
     return resolveAppearance(consNo, address || '', this.store.loadAppearance()[consNo], config);
+  }
+
+  cardDraft(payload) {
+    const settings = normalizeCardSettings(payload);
+    const accounts = this.store.loadAccountsCache()?.accounts || [];
+    if (Object.keys(settings.appearance).some((key) => !accounts.some((a) => a.consNo === key))) throw new Error('户号不在缓存中');
+    return {ok: true, settings: normalizeCardSettings({fields: settings.fields, appearance: {...this.store.loadAppearance(), ...settings.appearance}})};
+  }
+
+  applyCardConfig() {
+    this.store.applyCardConfig();
+    return {ok: true, fields: this.currentFields(), appearance: this.store.loadAppearance()};
   }
 
   setAppearance(payload = {}) {
