@@ -81,7 +81,7 @@ describe.runIf(process.env.SGCC_STREAM_TEST === '1')('独立 ffmpeg SRTP 互通'
     } finally {camera.stopStream(); receiver.close(); rmSync(dir, {recursive: true, force: true});}
   }, 15000);
 
-  it('父进程退出时不会遗留 ffmpeg 视频进程', async () => {
+  it('父进程异常退出时不会遗留 ffmpeg 视频进程', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'sgcc-encoder-exit-'));
     const file = join(dir, 'frame.png'); writeFileSync(file, renderPng(fallbackCardSvg(320, 180, '退出测试')));
     const receiver = createSocket('udp4'); await new Promise<void>(resolve => receiver.bind(0, '127.0.0.1', resolve));
@@ -91,14 +91,14 @@ describe.runIf(process.env.SGCC_STREAM_TEST === '1')('独立 ffmpeg SRTP 互通'
       const frame=fs.readFileSync(${JSON.stringify(file)});
       const camera=new UsageCamera({name:'exit',log:{warn:()=>{}},width:320,height:180,snapshot:async()=>frame,frame:async()=>frame,writeFrame:async()=>${JSON.stringify(file)},ffmpegPath:${JSON.stringify(defaultFfmpegPath())}});
       const request={sessionID:'exit',address:'127.0.0.1',videoPort:${(receiver.address() as {port: number}).port},videoSrtpKey:Buffer.alloc(16),videoSrtpSalt:Buffer.alloc(14)};
-      (async()=>{await camera.prepareStream(request);await camera.startStream(request);console.log(camera.sessions.get('exit').ffmpeg.pid);process.exit(0)})().catch(()=>process.exit(1));
+      (async()=>{await camera.prepareStream(request);await camera.startStream(request);console.log(camera.sessions.get('exit').ffmpeg.pid);setImmediate(()=>{throw new Error('expected crash for encoder cleanup test')})})().catch(()=>process.exit(1));
     `;
     const parent = spawn(process.execPath, ['-e', script], {stdio: ['ignore', 'pipe', 'pipe']});
     let output = ''; parent.stdout.on('data', x => {output += x;});
     let pid = 0;
     try {
       const code = await new Promise<number | null>((resolve, reject) => {parent.once('error', reject); parent.once('exit', resolve);});
-      expect(code).toBe(0); pid = Number(output.trim()); expect(pid).toBeGreaterThan(0);
+      expect(code).toBe(1); pid = Number(output.trim()); expect(pid).toBeGreaterThan(0);
       const alive = () => {try {process.kill(pid, 0); return true;} catch {return false;}};
       for (let i = 0; i < 20 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 100));
       expect(alive()).toBe(false);
