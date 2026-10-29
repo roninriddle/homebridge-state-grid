@@ -59,4 +59,50 @@ describe.runIf(process.env.SGCC_STREAM_TEST === '1')('独立 ffmpeg SRTP 互通'
       expect(firstPacket!.readUInt32BE(8)).not.toBe(plan2.ssrc);
     } finally {camera.stopStream(); decoder?.kill('SIGKILL'); receiver.close(); rmSync(dir,{recursive:true,force:true});}
   }, 20000);
+  it('快速停止后旧启动失败不会关闭同 ID 的新会话', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sgcc-session-race-'));
+    const receiver = createSocket('udp4');
+    await new Promise<void>(resolve => receiver.bind(0, '127.0.0.1', resolve));
+    let finish!: (frame: Buffer) => void;
+    let first = true;
+    const png = renderPng(fallbackCardSvg(320, 180, '会话测试'));
+    const camera = new UsageCamera({name: 'race', log: {warn: () => {}} as any, width: 320, height: 180, snapshot: async () => png,
+      frame: async () => {if (first) {first = false; return new Promise<Buffer>(resolve => {finish = resolve;});} return png;},
+      writeFrame: async (frame) => {const file = join(dir, 'frame.png'); writeFileSync(file, frame); return file;}, ffmpegPath: defaultFfmpegPath()});
+    const request = {sessionID: 'same', address: '127.0.0.1', videoPort: (receiver.address() as {port: number}).port, videoSrtpKey: Buffer.alloc(16), videoSrtpSalt: Buffer.alloc(14)};
+    try {
+      await camera.prepareStream(request);
+      const oldStart = camera.startStream(request).then(() => null, error => error);
+      camera.stopStream('same');
+      await camera.prepareStream(request);
+      finish(png);
+      expect((await oldStart).message).toContain('已停止');
+      await expect(camera.startStream(request)).resolves.toBeUndefined();
+    } finally {camera.stopStream(); receiver.close(); rmSync(dir, {recursive: true, force: true});}
+  }, 15000);
+
+  it('父进程退出时不会遗留 ffmpeg 视频进程', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sgcc-encoder-exit-'));
+    const file = join(dir, 'frame.png'); writeFileSync(file, renderPng(fallbackCardSvg(320, 180, '退出测试')));
+    const receiver = createSocket('udp4'); await new Promise<void>(resolve => receiver.bind(0, '127.0.0.1', resolve));
+    const script = `
+      const {UsageCamera}=require(${JSON.stringify(join(process.cwd(), 'dist/camera/camera-accessory.js'))});
+      const fs=require('fs');
+      const frame=fs.readFileSync(${JSON.stringify(file)});
+      const camera=new UsageCamera({name:'exit',log:{warn:()=>{}},width:320,height:180,snapshot:async()=>frame,frame:async()=>frame,writeFrame:async()=>${JSON.stringify(file)},ffmpegPath:${JSON.stringify(defaultFfmpegPath())}});
+      const request={sessionID:'exit',address:'127.0.0.1',videoPort:${(receiver.address() as {port: number}).port},videoSrtpKey:Buffer.alloc(16),videoSrtpSalt:Buffer.alloc(14)};
+      (async()=>{await camera.prepareStream(request);await camera.startStream(request);console.log(camera.sessions.get('exit').ffmpeg.pid);process.exit(0)})().catch(()=>process.exit(1));
+    `;
+    const parent = spawn(process.execPath, ['-e', script], {stdio: ['ignore', 'pipe', 'pipe']});
+    let output = ''; parent.stdout.on('data', x => {output += x;});
+    let pid = 0;
+    try {
+      const code = await new Promise<number | null>((resolve, reject) => {parent.once('error', reject); parent.once('exit', resolve);});
+      expect(code).toBe(0); pid = Number(output.trim()); expect(pid).toBeGreaterThan(0);
+      const alive = () => {try {process.kill(pid, 0); return true;} catch {return false;}};
+      for (let i = 0; i < 20 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 100));
+      expect(alive()).toBe(false);
+    } finally {parent.kill('SIGKILL'); if(pid) {try {process.kill(pid, 'SIGKILL');} catch {}} receiver.close(); rmSync(dir, {recursive: true, force: true});}
+  }, 15000);
+
 });

@@ -283,11 +283,13 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
    */
   private startConfigWatcher(): void {
     if (this.configWatcher) return;
+    try { this.store.applyCardConfig(); } catch (error) { this.log.warn(`卡片设置应用失败：${(error as Error).message}`); }
     // 初始化基线，避免启动时把「首次读到的内容」误判成变化。
     this.lastAppearanceRaw = this.store.readAppearanceRaw();
     this.lastFieldsRaw = this.store.readFieldsRaw();
     this.lastVisibilityRaw = this.store.readVisibilityRaw();
     this.configWatcher = setInterval(() => {
+      try { this.store.applyCardConfig(); } catch (error) { this.log.warn(`卡片设置应用失败：${(error as Error).message}`); }
       void this.reconcileAppearance().catch((error) => this.log.warn(`名称更新失败：${(error as Error).message}`));
       this.reconcileFields();
       void this.reconcileVisibility();
@@ -716,33 +718,49 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     // sessionID -> prepareStream 阶段收到的连接信息。
     const sessions = new Map<string, import('./camera/camera-accessory.js').CameraStreamRequest>();
 
+    // HAP 可能已因超时结束请求。回调自身抛错时不能再次调用，否则会击穿子网桥。
+    const replyOnce = <T extends unknown[]>(callback: (...args: T) => void) => {
+      let replied = false;
+      return (...args: T): boolean => {
+        if (replied) return false;
+        replied = true;
+        try { callback(...args); return true; }
+        catch (error) { this.log.debug(`HomeKit 请求已结束：${(error as Error).message}`); return false; }
+      };
+    };
+
     const delegate = {
       handleSnapshotRequest: (
         _request: unknown,
         callback: (error?: Error, buffer?: Buffer) => void,
       ) => {
+        const reply = replyOnce(callback);
         void (async () => {
           try {
-            callback(undefined, await entry.camera.snapshot());
+            reply(undefined, await entry.camera.snapshot());
           } catch (error) {
-            callback(error as Error);
+            reply(error as Error);
           }
         })();
       },
       prepareStream: (request: any, callback: (error?: Error, response?: unknown) => void) => {
+        const reply = replyOnce(callback);
         void (async () => {
           try {
             const info = { sessionID: request.sessionID, address: request.targetAddress, videoPort: request.video.port, videoSrtpKey: request.video.srtp_key, videoSrtpSalt: request.video.srtp_salt };
             sessions.set(request.sessionID, info);
             const plan = await entry.camera.prepareStream(info);
-            callback(undefined, { video: { port: plan.port, ssrc: plan.ssrc, srtp_key: plan.srtpKey, srtp_salt: plan.srtpSalt } });
-          } catch (error) { sessions.delete(request.sessionID); callback(error as Error); }
+            if (!sessions.has(request.sessionID) || !reply(undefined, { video: { port: plan.port, ssrc: plan.ssrc, srtp_key: plan.srtpKey, srtp_salt: plan.srtpSalt } })) {
+              sessions.delete(request.sessionID); entry.camera.stopStream(request.sessionID);
+            }
+          } catch (error) { sessions.delete(request.sessionID); entry.camera.stopStream(request.sessionID); reply(error as Error); }
         })();
       },
       handleStreamRequest: (request: any, callback: (error?: Error) => void) => {
+        const reply = replyOnce(callback);
         void (async () => {
           try {
-            if (request.type === 'stop') { entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID); callback(); return; }
+            if (request.type === 'stop') { entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID); reply(); return; }
             const info = sessions.get(request.sessionID);
             if (!info) throw new Error('找不到视频协商会话');
             const video = request.video || {};
@@ -750,11 +768,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
             sessions.set(request.sessionID, options);
             if (request.type === 'reconfigure') await entry.camera.reconfigure(request.sessionID, options);
             else await entry.camera.startStream(options);
-            callback();
+            if (!reply()) { entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID); }
           } catch (error) {
             entry.camera.stopStream(request.sessionID); sessions.delete(request.sessionID);
             this.log.warn(`视频流启动失败：${(error as Error).message}`);
-            callback(error as Error);
+            reply(error as Error);
           }
         })();
       },
@@ -780,7 +798,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       },
     });
 
-    entry.cameraError = (id: string) => { sessions.delete(id); controller.forceStopStreamingSession(id); };
+    entry.cameraError = (id: string) => {
+      sessions.delete(id);
+      try { controller.forceStopStreamingSession(id); } catch (error) { this.log.debug(`视频会话已结束：${(error as Error).message}`); }
+    };
     accessory.configureController(controller);
   }
 

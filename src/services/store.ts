@@ -17,6 +17,7 @@ import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 
 import type { AccountAppearance } from './appearance.js';
+import { normalizeCardSettings } from './card-settings.js';
 import type { LoginSession, AccountSnapshot } from '../sgcc/types.js';
 import {
   createProfileState,
@@ -338,6 +339,20 @@ export class PluginStore {
 
   saveFields(fields: string[]): void {
     writeJson(join(this.dir, 'fields.json'), fields);
+  }
+
+  /** 原生底部保存写入 config.json 后导入一次；不覆盖未保存草稿或其他插件配置。 */
+  applyCardConfig(): boolean {
+    const config = readJson<{platforms?: Array<{platform?: string; cardSettings?: unknown}>}>(join(this.dir, '..', 'config.json'));
+    const value = config?.platforms?.find((item) => item.platform === 'StateGrid')?.cardSettings;
+    if (!value) return false;
+    const settings = normalizeCardSettings(value);
+    const file = join(this.dir, 'card-settings-applied.json');
+    if (readJson<{revision?: string}>(file)?.revision === settings.revision) return false;
+    this.saveFields(settings.fields);
+    writeJson(join(this.dir, 'appearance.json'), {...this.loadAppearance(), ...settings.appearance});
+    writeJson(file, {revision: settings.revision});
+    return true;
   }
 
   /**

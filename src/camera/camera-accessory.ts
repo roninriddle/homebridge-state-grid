@@ -27,6 +27,11 @@ export interface StreamPlan {
 const FRAME_RATE = 2;
 const PAYLOAD_TYPE = 99;
 const CLOCK_RATE = 90_000;
+const encoders = new Set<ChildProcess>();
+// 即使 HAP/其他依赖抛出未捕获异常，Node 退出时也要同步结束编码器，避免孤儿视频流。
+process.once('exit', () => {
+  for (const encoder of encoders) { try { encoder.kill('SIGKILL'); } catch { /* 进程已退出 */ } }
+});
 
 export function streamArguments(request: CameraStreamRequest, plan: StreamPlan, imagePath: string, width: number, height: number): string[] {
   const host = isIP(request.address) === 6 ? '[' + request.address + ']' : request.address;
@@ -89,8 +94,8 @@ export class UsageCamera {
       srtpSalt: request.videoSrtpSalt,
     };
     const session: Session = { request, plan, socket };
-    socket.on('error', () => this.failSession(id, '视频 UDP 连接异常'));
-    session.timer = setTimeout(() => this.stopStream(id), 30_000);
+    socket.on('error', () => this.failSession(id, '视频 UDP 连接异常', session));
+    session.timer = setTimeout(() => this.stopCurrentSession(id, session), 30_000);
     session.timer.unref?.();
     this.sessions.set(id, session);
     return plan;
@@ -112,11 +117,12 @@ export class UsageCamera {
         let ready = false;
         const timer = setTimeout(() => {
           reject(new Error('视频编码器启动超时'));
-          this.stopStream(id);
+          this.stopCurrentSession(id, session);
         }, 8000);
         timer.unref?.();
         const ff = spawn(this.options.ffmpegPath, streamArguments(merged, session.plan, imagePath, this.options.width, this.options.height), { stdio: ['ignore', 'ignore', 'pipe'] });
         session.ffmpeg = ff;
+        encoders.add(ff);
         ff.stderr?.on('data', (chunk: Buffer) => {
           if (/frame=\s*[1-9]/.test(chunk.toString())) {
             ready = true;
@@ -124,15 +130,16 @@ export class UsageCamera {
             resolve();
           }
         });
-        ff.once('error', () => { clearTimeout(timer); reject(new Error('无法启动视频编码器')); this.failSession(id, '无法启动视频编码器'); });
+        ff.once('error', () => { encoders.delete(ff); clearTimeout(timer); reject(new Error('无法启动视频编码器')); this.failSession(id, '无法启动视频编码器', session); });
         ff.once('exit', () => {
+          encoders.delete(ff);
           clearTimeout(timer);
           if (!ready) reject(new Error('视频编码器未能输出画面'));
-          if (!session.stopping) this.failSession(id, '视频编码器已退出');
+          if (!session.stopping) this.failSession(id, '视频编码器已退出', session);
         });
       });
     } catch (error) {
-      this.stopStream(id);
+      this.stopCurrentSession(id, session);
       throw error;
     }
   }
@@ -145,9 +152,13 @@ export class UsageCamera {
     await this.startStream(request);
   }
 
-  private failSession(id: string, message: string): void {
+  private stopCurrentSession(id: string, expected: Session): void {
+    if (this.sessions.get(id) === expected) this.stopStream(id);
+  }
+
+  private failSession(id: string, message: string, expected: Session): void {
     const session = this.sessions.get(id);
-    if (!session || session.stopping) return;
+    if (!session || session !== expected || session.stopping) return;
     this.options.log.warn(message);
     this.stopStream(id);
     this.options.onStreamError?.(id);
