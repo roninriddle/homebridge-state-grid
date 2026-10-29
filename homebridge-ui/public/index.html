@@ -50,6 +50,18 @@
       h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
       .hint { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
 
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+      .tab {
+        padding: 10px 16px;
+        border: none;
+        border-bottom: 2px solid transparent;
+        background: transparent;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 14px;
+      }
+      .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+
       .status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
       .dot.ok { background: var(--ok); }
@@ -123,79 +135,87 @@
   </head>
   <body>
     <div class="wrap">
-      <!-- 连接状态 -->
-      <section class="panel">
-        <h2>连接状态</h2>
-        <p class="hint">凭据加密保存在 Homebridge 的 storage 目录，只有本机同一用户能解开。</p>
-        <div class="status">
-          <span class="dot" id="dot"></span>
-          <span id="stateText">正在读取…</span>
-          <span class="meta" id="metaText"></span>
-        </div>
-        <div class="tip hidden" id="statusTip"></div>
-      </section>
+      <nav class="tabs">
+        <button class="tab active" id="tabBtnLogin" onclick="switchTab('login')">连接与登录</button>
+        <button class="tab" id="tabBtnAccounts" onclick="switchTab('accounts')">户号与卡片预览</button>
+      </nav>
 
-      <!-- 登录 -->
-      <section class="panel">
-        <h2>账号登录</h2>
-        <p class="hint">
-          用「网上国网」App 的手机号登录。国网对「密码登录」有风控（密码过于简单时会返回
-          RK007「网络连接超时」），此时请改用「短信验证码登录」绕过密码校验。
-        </p>
-        <div class="row">
-          <div>
-            <label for="username">手机号</label>
-            <input id="username" inputmode="numeric" autocomplete="username" placeholder="11 位手机号" />
+      <!-- Tab 1：连接与登录 -->
+      <div id="tab-login">
+        <section class="panel">
+          <h2>连接状态</h2>
+          <p class="hint">凭据加密保存在 Homebridge 的 storage 目录，只有本机同一用户能解开。</p>
+          <div class="status">
+            <span class="dot" id="dot"></span>
+            <span id="stateText">正在读取…</span>
+            <span class="meta" id="metaText"></span>
           </div>
-          <div>
-            <label for="password">密码</label>
-            <input id="password" type="password" autocomplete="current-password" placeholder="密码登录才需要" />
-          </div>
-        </div>
-        <div class="actions">
-          <button class="primary" id="loginBtn">密码登录</button>
-          <button id="smsLoginBtn">短信验证码登录</button>
-          <button class="ghost" id="resetBtn">清除本机登录态</button>
-        </div>
-        <div class="tip hidden" id="loginTip"></div>
+          <div class="tip hidden" id="statusTip"></div>
+        </section>
 
-        <!-- 短信验证 -->
-        <div class="hidden" id="smsBox">
-          <label for="smsCode">短信验证码</label>
+        <section class="panel">
+          <h2>账号登录</h2>
+          <p class="hint">
+            用「网上国网」App 的手机号登录。国网对「密码登录」有风控（密码过于简单时会返回
+            RK007「网络连接超时」），此时请改用「短信验证码登录」绕过密码校验。
+          </p>
           <div class="row">
-            <input id="smsCode" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
-            <div class="actions" style="margin: 0">
-              <button id="sendSmsBtn">发送验证码</button>
-              <button class="primary" id="verifyBtn">提交</button>
+            <div>
+              <label for="username">手机号</label>
+              <input id="username" inputmode="numeric" autocomplete="username" placeholder="11 位手机号" />
+            </div>
+            <div>
+              <label for="password">密码</label>
+              <input id="password" type="password" autocomplete="current-password" placeholder="密码登录才需要" />
             </div>
           </div>
-          <div class="tip hidden" id="smsTip"></div>
-        </div>
-      </section>
+          <div class="actions">
+            <button class="primary" id="loginBtn">密码登录</button>
+            <button id="smsLoginBtn">短信验证码登录</button>
+            <button class="ghost" id="resetBtn">清除本机登录态</button>
+          </div>
+          <div class="tip hidden" id="loginTip"></div>
 
-      <!-- 户号 -->
-      <section class="panel">
-        <h2>户号与卡片预览</h2>
-        <p class="hint">
-          每张卡片对应一个户号，在「家庭」App 里就是一路摄像头。卡片标题、主题、更新周期在插件设置里改。
-        </p>
-        <div class="actions" style="margin-top: 0">
-          <button id="loadBtn">读取户号</button>
-        </div>
-        <div id="accounts" style="margin-top: 6px"></div>
-        <div class="tip hidden" id="accountsTip"></div>
-      </section>
+          <div class="hidden" id="smsBox">
+            <label for="smsCode">短信验证码</label>
+            <div class="row">
+              <input id="smsCode" inputmode="numeric" maxlength="6" placeholder="6 位数字" />
+              <div class="actions" style="margin: 0">
+                <button id="sendSmsBtn">发送验证码</button>
+                <button class="primary" id="verifyBtn">提交</button>
+              </div>
+            </div>
+            <div class="tip hidden" id="smsTip"></div>
+          </div>
+        </section>
 
-      <!-- 说明 -->
-      <section class="panel">
-        <h2>接下来</h2>
-        <ol class="steps">
-          <li>登录成功后，插件会把户号写进日志；在插件设置里给每个户号起个标题、决定是否显示。</li>
-          <li>保存设置后重启 Homebridge，用「家庭」App 扫码添加 Homebridge。</li>
-          <li>添加完成后，首页会出现对应数量的摄像头，点开即是有画面的用电卡片。</li>
-          <li>更新周期最短 6 小时、最长 24 小时；数据没拿到时卡片会显示「—」并标注未更新，不会补 0。</li>
-        </ol>
-      </section>
+        <section class="panel">
+          <h2>接下来</h2>
+          <ol class="steps">
+            <li>登录成功后，插件会把户号写进日志；在插件设置里给每个户号起个标题、决定是否显示。</li>
+            <li>保存设置后重启 Homebridge，用「家庭」App 扫码添加 Homebridge。</li>
+            <li>添加完成后，首页会出现对应数量的摄像头，点开即是有画面的用电卡片。</li>
+            <li>更新周期最短 6 小时、最长 24 小时；数据没拿到时卡片会显示「—」并标注未更新，不会补 0。</li>
+          </ol>
+        </section>
+      </div>
+
+      <!-- Tab 2：户号与卡片预览 -->
+      <div id="tab-accounts" class="hidden">
+        <section class="panel">
+          <h2>户号与卡片预览</h2>
+          <p class="hint">
+            每张卡片对应一个户号，在「家庭」App 里就是一路摄像头。下方数据来自插件最近一次刷新缓存，
+            打开本页不会重新联网；点「刷新」才向国网拉取最新数据。
+          </p>
+          <div class="actions" style="margin-top: 0">
+            <button class="primary" id="refreshBtn">刷新</button>
+            <span class="meta" id="cacheMeta"></span>
+          </div>
+          <div id="accounts" style="margin-top: 6px"></div>
+          <div class="tip hidden" id="accountsTip"></div>
+        </section>
+      </div>
     </div>
 
     <script>
@@ -235,44 +255,32 @@
         return `<div class="metric"><div class="k">${key}</div><div class="v">${value}</div></div>`;
       }
 
-      async function refreshStatus() {
-        try {
-          const status = await bridge.request('/status');
-          if (!status.ok) {
-            setDot('err', status.message || '读取失败');
-            return;
-          }
-          if (status.connected) setDot('ok', '已登录');
-          else if (status.hasSession) setDot('warn', '已有会话，等待主进程刷新');
-          else setDot('', '未登录');
-
-          const bits = [];
-          if (status.username) bits.push(status.username);
-          if (status.hasPassword) bits.push('密码已保存');
-          $('metaText').textContent = bits.join(' · ');
-
-          if (status.pending && status.pending.kind) {
-            $('smsBox').classList.remove('hidden');
-            showTip('smsTip', '已完成一次登录尝试，需要短信验证码才能继续。', 'warn');
-          }
-        } catch (error) {
-          setDot('err', error.message || String(error));
-        }
+      // 快照摘要 → 指标网格（缓存与联网刷新共用同一字段结构）。
+      function metricsHtml(s) {
+        const balanceVal = s.balance != null ? s.balance : s.amountDue;
+        const balanceLabel = s.balance != null ? '余额' : '应交电费';
+        return [
+          metric(balanceLabel, fmt(balanceVal, '元', 2)),
+          metric('上日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
+          metric('当月用电', fmt(s.currentMonthUsage, 'kWh', 2)),
+          metric('本月估算', fmt(s.estimate, '元', 2)),
+          metric('上月电费', fmt(s.latestMonthCharge, '元', 2)),
+          metric('年累计电费', fmt(s.currentYearCharge, '元', 2)),
+        ].join('');
       }
 
-      function renderAccounts(list) {
-        currentAccounts = list || [];
-        const box = $('accounts');
-        if (!currentAccounts.length) {
-          box.innerHTML = '<div class="tip warn">没有读到户号。确认账号已绑定户号，或稍后再试。</div>';
-          return;
-        }
-        box.innerHTML = currentAccounts
-          .map(
-            (a) => `
+      function accountHtml(a, fromCache) {
+        const name = a.title || a.name || '未命名户号';
+        const hasSnapshot = a.snapshot && typeof a.snapshot === 'object';
+        const metricsContent = hasSnapshot
+          ? metricsHtml(a.snapshot)
+          : fromCache
+            ? '<div class="metric"><div class="k">数据</div><div class="v">—</div></div>'
+            : '<div class="metric"><div class="k">数据</div><div class="v">读取中…</div></div>';
+        return `
           <div class="acct" data-consno="${a.consNo}">
             <div class="acct-head">
-              <span class="acct-name">${a.name || '未命名户号'}</span>
+              <span class="acct-name">${name}</span>
               <span class="acct-sub">${a.consNoMasked}${a.consType ? ' · ' + a.consType : ''}</span>
               ${a.address ? `<span class="acct-sub">${a.address}</span>` : ''}
               <label class="switch" style="margin-left: auto">
@@ -281,15 +289,63 @@
               </label>
             </div>
             <div class="acct-body">
-              <div class="metrics" id="m-${a.consNo}">
-                <div class="metric"><div class="k">数据</div><div class="v">读取中…</div></div>
-              </div>
+              <div class="metrics" id="m-${a.consNo}">${metricsContent}</div>
               <div class="shot empty" id="s-${a.consNo}">预览生成中…</div>
             </div>
-          </div>`,
-          )
-          .join('');
-        for (const account of currentAccounts) void loadPreview(account.consNo);
+          </div>`;
+      }
+
+      function renderAccounts(list, opts = {}) {
+        currentAccounts = list || [];
+        const box = $('accounts');
+        if (!currentAccounts.length) {
+          box.innerHTML = '<div class="tip warn">没有读到户号。点「刷新」重新读取，或确认账号已绑定户号。</div>';
+          return;
+        }
+        box.innerHTML = currentAccounts.map((a) => accountHtml(a, opts.fromCache)).join('');
+        for (const account of currentAccounts) {
+          if (opts.fromCache) void loadCachedPreview(account.consNo, account.snapshot);
+          else void loadPreview(account.consNo);
+        }
+      }
+
+      // 切到「户号与卡片预览」时读缓存（纯本地，不联网）。
+      async function loadCachedAccounts() {
+        try {
+          const result = await bridge.request('/accounts-cache');
+          if (!result.ok) {
+            showTip('accountsTip', result.message || '读取缓存失败', 'err');
+            return;
+          }
+          const updatedAt = result.updatedAt
+            ? new Date(result.updatedAt).toLocaleString('zh-CN', { hour12: false })
+            : '—';
+          $('cacheMeta').textContent = result.updatedAt ? `缓存时间 ${updatedAt}` : '暂无缓存';
+          renderAccounts(result.accounts || [], { fromCache: true });
+        } catch (error) {
+          showTip('accountsTip', error.message || String(error), 'err');
+        }
+      }
+
+      async function loadCachedPreview(consNo, snapshot) {
+        const shot = $('s-' + consNo);
+        if (snapshot && $('m-' + consNo)) {
+          $('m-' + consNo).innerHTML = metricsHtml(snapshot);
+        }
+        try {
+          const result = await bridge.request('/preview-cache', { consNo });
+          if (shot && result.ok && result.image) {
+            shot.outerHTML = `<img class="shot" id="s-${consNo}" src="${result.image}" alt="用电卡片预览" />`;
+          } else if (shot) {
+            shot.className = 'shot empty';
+            shot.textContent = '暂无缓存预览';
+          }
+        } catch (error) {
+          if (shot) {
+            shot.className = 'shot empty';
+            shot.textContent = error.message || String(error);
+          }
+        }
       }
 
       async function toggleAccount(consNo, enabled) {
@@ -319,18 +375,8 @@
             return;
           }
           const s = result.snapshot || {};
-          if (metrics) {
-            metrics.innerHTML = [
-              metric('余额', fmt(s.balance, '元', 2)),
-              metric('今日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
-              metric('本月用电', fmt(s.currentMonthUsage, 'kWh', 2)),
-              metric('本月估算', fmt(s.estimate, '元', 2)),
-              metric('上月用电', fmt(s.latestMonthUsage, 'kWh', 2)),
-              metric('本年电量', fmt(s.currentYearUsage, 'kWh', 1)),
-            ].join('');
-          }
+          if (metrics) metrics.innerHTML = metricsHtml(s);
           if (shot && result.image) {
-            shot.className = 'shot';
             shot.outerHTML = `<img class="shot" id="s-${consNo}" src="${result.image}" alt="用电卡片预览" />`;
           }
         } catch (error) {
@@ -353,6 +399,40 @@
         }
       }
 
+      async function refreshStatus() {
+        try {
+          const status = await bridge.request('/status');
+          if (!status.ok) {
+            setDot('err', status.message || '读取失败');
+            return;
+          }
+          if (status.connected) setDot('ok', '已登录');
+          else if (status.hasSession) setDot('warn', '已有会话，等待主进程刷新');
+          else setDot('', '未登录');
+
+          const bits = [];
+          if (status.username) bits.push(status.username);
+          if (status.hasPassword) bits.push('密码已保存');
+          $('metaText').textContent = bits.join(' · ');
+
+          if (status.pending && status.pending.kind) {
+            $('smsBox').classList.remove('hidden');
+            showTip('smsTip', '已完成一次登录尝试，需要短信验证码才能继续。', 'warn');
+          }
+        } catch (error) {
+          setDot('err', error.message || String(error));
+        }
+      }
+
+      function switchTab(tab) {
+        const isLogin = tab === 'login';
+        $('tab-login').classList.toggle('hidden', !isLogin);
+        $('tab-accounts').classList.toggle('hidden', isLogin);
+        $('tabBtnLogin').classList.toggle('active', isLogin);
+        $('tabBtnAccounts').classList.toggle('active', !isLogin);
+        if (!isLogin) void loadCachedAccounts();
+      }
+
       $('loginBtn').addEventListener('click', () =>
         withBusy($('loginBtn'), async () => {
           showTip('loginTip', '');
@@ -367,7 +447,6 @@
             $('password').value = '';
             showTip('loginTip', '登录成功。', '');
             await refreshStatus();
-            renderAccounts(result.accounts || []);
             return;
           }
           if (result.reason === 'need_device_sms') {
@@ -437,19 +516,26 @@
           $('smsBox').classList.add('hidden');
           showTip('smsTip', '');
           await refreshStatus();
-          renderAccounts(result.accounts || []);
         }),
       );
 
-      $('loadBtn').addEventListener('click', () =>
-        withBusy($('loadBtn'), async () => {
+      $('refreshBtn').addEventListener('click', () =>
+        withBusy($('refreshBtn'), async () => {
           showTip('accountsTip', '');
           const result = await bridge.request('/accounts');
           if (!result.ok) {
-            showTip('accountsTip', result.message || '读取失败', 'err');
+            if (result.reason === 'bad_credentials') {
+              showTip(
+                'accountsTip',
+                '登录态已过期且密码登录被国网风控（RK007）。请切到「连接与登录」页用「短信验证码登录」重新登录。',
+                'warn',
+              );
+            } else {
+              showTip('accountsTip', result.message || '读取失败', 'err');
+            }
             return;
           }
-          renderAccounts(result.accounts || []);
+          renderAccounts(result.accounts || [], { fromCache: false });
         }),
       );
 

@@ -56,7 +56,7 @@ npm install -g homebridge-state-grid
 | `fields[]` | 卡片指标显示与顺序，共 19 个可选（`balance` / `monthEstimateCharge` / `currentMonthUsage` / `latestDailyUsage` / 分时 `latestPeak/Valley/Flat/SharpUsage` / `latestMonthUsage` / `latestMonthCharge` / `currentYearUsage` / `currentYearCharge` / `monthPeak/Valley/Flat/SharpUsage` / `ladderLevel` / `penalty` / `historyOwe`） | 12 项默认 |
 | `accounts[]` | 户号级配置：`consNo`、`title`、`enabled` | 全部启用 |
 
-`consNo` 填接口返回的**原始户号**（`consNoSrc`）。设置页「读取户号」时会把可用户号打印出来，照抄即可。
+`consNo` 填接口返回的**原始户号**（`consNoSrc`）。在设置页「户号与卡片预览」标签页里能看到每个户号及其卡片预览，照抄即可。
 
 `fields` 是一个**有序数组**，顺序即显示顺序：第 1 项是卡片主数字，第 2 项与它并列，其余进入下方 3 列网格。在 Homebridge 设置页里它就是「卡片指标」列表——删除某行 = 不显示该指标，上下调整行顺序 = 改变显示位置，全程图形化，无需手写 JSON。
 
@@ -68,10 +68,12 @@ npm install -g homebridge-state-grid
 
 1. 插件设置页 → 填手机号 → **密码登录**，或点 **短信验证码登录**（无需密码）
 2. 若返回 `4006`（新设备校验）→ **发送验证码** → 填入 6 位码 → **提交**
-3. 登录成功后点 **读取户号**，逐个确认卡片预览；每个户号右上角有**启用开关**，关闭后该户号不会生成摄像头卡片
+3. 登录成功后切到 **户号与卡片预览** 标签页查看户号与卡片；每个户号右上角有**启用开关**，关闭后该户号不会生成摄像头卡片
 4. 保存设置 → 重启 Homebridge → 在「家庭」App 里添加 Homebridge
 
 > 💡 密码登录若报 `RK007 网络连接超时`，多半是密码过于简单被风控拒绝，改用**短信验证码登录**即可绕过，或到 App 里把密码改成复杂密码。
+
+设置页分两个标签页：**连接与登录**、**户号与卡片预览**。「户号与卡片预览」打开时默认读插件最近一次刷新落盘的缓存（户号列表、指标摘要、卡片预览图），**不重新联网**，因此不会反复触发国网的风控；只有点「刷新」按钮才向国网拉取最新数据。缓存由主进程在每个刷新周期自动更新，也由「刷新」按钮手动更新。
 
 登录态（token）与设备种子写在 `storage/state-grid/` 下，重启后沿用，不会重复要验证码。
 

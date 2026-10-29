@@ -57,6 +57,18 @@ function registerRoutes(server, gateway) {
     safe(async () => gateway.accounts()),
   );
 
+  /** 读缓存里的户号列表 + 快照摘要（纯本地，不联网）。 */
+  server.onRequest(
+    '/accounts-cache',
+    safe(async () => gateway.cachedAccounts()),
+  );
+
+  /** 读缓存里的单户号预览图（纯本地，不联网）。 */
+  server.onRequest(
+    '/preview-cache',
+    safe(async (payload) => gateway.cachedPreview(payload.consNo)),
+  );
+
   /** 切换某户号是否生成卡片。 */
   server.onRequest(
     '/visibility',

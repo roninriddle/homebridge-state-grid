@@ -22,6 +22,7 @@ import {
   StateGridDeviceVerificationRequired,
   StateGridError,
   StateGridInteractiveChallengeRequired,
+  powerAccounts,
   type AccountSnapshot,
   type PowerAccount,
 } from './sgcc/types.js';
@@ -33,6 +34,12 @@ import { UsageCamera } from './camera/camera-accessory.js';
 import { PluginStore } from './services/store.js';
 import { assembleProfile } from './services/device-profile.js';
 import { formatClock } from './renderer/format.js';
+import {
+  estimateCharge,
+  maskConsNo,
+  regionFromAddress,
+  summarizeSnapshot,
+} from './services/summary.js';
 
 export const PLATFORM_NAME = 'StateGrid';
 export const PLUGIN_NAME = 'homebridge-state-grid';
@@ -80,14 +87,6 @@ function cleanAccessoryName(name: string): string {
   const cleaned = (name || '').replace(/^\*+|\*+$/g, '').trim();
   // HAP 要求名称首尾各至少一个字母/数字（长度 ≥ 2），单字名（如脱敏后仅剩"邗"）无法通过校验。
   return Array.from(cleaned).length >= 2 ? cleaned : '';
-}
-
-/** 从脱敏地址提取地区（省/市/区），去掉 `*` 及之后的详细地址与省级前缀。 */
-function regionFromAddress(address: string): string {
-  const region = (address || '').split('*')[0].trim();
-  if (!region) return '';
-  // 去掉省级前缀（如"河北省"→"石家庄市裕华区"）；直辖市（"北京市"）不含"省"，原样保留。
-  return region.replace(/^[\u4e00-\u9fa5]{1,3}省/, '').trim();
 }
 
 export class StateGridPlatform implements DynamicPlatformPlugin {
@@ -292,7 +291,17 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private accounts(): PowerAccount[] {
-    return this.client?.accounts ?? [];
+    const live = this.client?.accounts ?? [];
+    if (live.length) return live;
+    // 登录态过期/密码登录被风控时，client.session 已被清空，但磁盘 session 的
+    // userInfo 里还留着户号列表。用它兜底，保证设置页仍能看到户号（数据标「—」），
+    // 而不是「没读到户号」。
+    const session = this.store.loadSession();
+    if (session?.userInfo) {
+      const fromDisk = powerAccounts(session.userInfo);
+      if (fromDisk.length) return fromDisk;
+    }
+    return [];
   }
 
   private configFor(account: PowerAccount): AccountConfig | undefined {
@@ -339,6 +348,35 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.persistStatus();
   }
 
+  /**
+   * 把户号列表 + 各户号快照摘要落盘，供设置页读取。
+   *
+   * 设置页跑在独立进程里，唯一的共享面是 storage 目录。默认读这份缓存、
+   * 不联网，就不会反复触发国网的短信/密码风控（RK007 超时）。
+   */
+  private persistAccountsCache(): void {
+    try {
+      const accounts = this.accounts().map((account) => {
+        const entry = this.entries.get(account.consNoSrc);
+        return {
+          consNo: account.consNoSrc,
+          consNoMasked: maskConsNo(account.consNoSrc),
+          name: account.name || '',
+          address: account.address || '',
+          consType: account.consType || '',
+          title: this.titleFor(account),
+          enabled: this.enabled(account),
+          lastSuccess: entry?.lastSuccess ?? null,
+          lastError: entry?.lastError ?? null,
+          snapshot: entry?.snapshot ? summarizeSnapshot(entry.snapshot) : null,
+        };
+      });
+      this.store.saveAccountsCache({ updatedAt: Date.now(), accounts });
+    } catch (error) {
+      this.log.debug(`写入户号缓存失败：${(error as Error).message}`);
+    }
+  }
+
   /** 把快照渲染成 PNG（给 ffmpeg）与 JPEG（给 HomeKit）。 */
   private async paint(entry: CameraEntry): Promise<void> {
     if (!entry.snapshot) return;
@@ -376,6 +414,12 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       const png = renderPng(renderCard(card), { width: this.width });
       entry.png = png;
       entry.jpeg = await pngToJpeg(png, { width: this.width, quality: 88 });
+      // 落盘预览缓存：设置页读它渲染缩略图，避免每次打开都联网拉数据。
+      try {
+        this.store.saveCachedPreview(entry.consNo, entry.jpeg);
+      } catch (error) {
+        this.log.debug(`写入预览缓存失败：${(error as Error).message}`);
+      }
     } catch (error) {
       this.log.warn(`卡片渲染失败：${(error as Error).message}`);
       await this.paintFallback(entry, '卡片渲染失败');
@@ -408,6 +452,9 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     } catch (error) {
       this.log.debug(`写入状态文件失败：${(error as Error).message}`);
     }
+    // 状态与户号缓存一起落盘，保证「需要验证码/风控」等非 ready 状态下，
+    // 设置页仍能读到户号列表（数据标「—」）。
+    this.persistAccountsCache();
   }
 
   private async detailSnapshot(title: string, snapshot: AccountSnapshot): Promise<Buffer> {
@@ -661,20 +708,6 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     if (!entry?.snapshot) return null;
     return this.detailSnapshot(entry.title, entry.snapshot);
   }
-}
-
-/**
- * 本月电费估算：用最近结算月的**实际均价**反推，而不是硬编码阶梯电价。
- *
- * 这样能自动适配地区差异，误差比固定电价小得多，但仍然只是估算——
- * 卡片上必须带"估算"字样。
- */
-function estimateCharge(snapshot: AccountSnapshot): number | undefined {
-  const { latestMonthCharge, latestMonthUsage, currentMonthUsage } = snapshot;
-  if (!latestMonthCharge || !latestMonthUsage || !currentMonthUsage) return undefined;
-  const unitPrice = latestMonthCharge / latestMonthUsage;
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return undefined;
-  return Math.round(currentMonthUsage * unitPrice * 100) / 100;
 }
 
 export const __test = { estimateCharge };

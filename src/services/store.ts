@@ -50,6 +50,27 @@ interface AccountState {
   region?: string;
 }
 
+/** 单个户号的缓存条目（主进程刷新后落盘，设置页读它避免联网）。 */
+export interface CachedAccount {
+  consNo: string;
+  consNoMasked: string;
+  name: string;
+  address: string;
+  consType: string;
+  title: string;
+  enabled: boolean;
+  lastSuccess: number | null;
+  lastError: string | null;
+  /** summarizeSnapshot 的产物；没拉到数据时为 null。 */
+  snapshot: Record<string, unknown> | null;
+}
+
+/** 户号缓存文件结构。 */
+export interface AccountsCache {
+  updatedAt: number;
+  accounts: CachedAccount[];
+}
+
 function derivedKey(): Buffer {
   const material = `${hostname()}|${userInfo().username}|${KDF_SALT}`;
   return createHash('sha256').update(material, 'utf8').digest();
@@ -213,6 +234,37 @@ export class PluginStore {
     const dir = join(this.dir, 'cache');
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
+  }
+
+  /** 卡片预览 JPEG 的缓存目录，设置页读它渲染缩略图，不用联网。 */
+  previewDir(): string {
+    const dir = join(this.cacheDir(), 'preview');
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    return dir;
+  }
+
+  /** 户号列表 + 快照摘要缓存。 */
+  loadAccountsCache(): AccountsCache | null {
+    return readJson<AccountsCache>(join(this.cacheDir(), 'accounts-cache.json'));
+  }
+
+  saveAccountsCache(cache: AccountsCache): void {
+    writeJson(join(this.cacheDir(), 'accounts-cache.json'), cache);
+  }
+
+  /** 读取某户号的预览图缓存（JPEG），没有则返回 null。 */
+  loadCachedPreview(consNo: string): Buffer | null {
+    const file = join(this.previewDir(), `${consNo}.jpg`);
+    if (!existsSync(file)) return null;
+    try {
+      return readFileSync(file);
+    } catch {
+      return null;
+    }
+  }
+
+  saveCachedPreview(consNo: string, jpeg: Buffer): void {
+    writeFileSync(join(this.previewDir(), `${consNo}.jpg`), jpeg, { mode: 0o600 });
   }
 
   /** 户号显示开关（设置页「户号与卡片预览」里的启用/停用）。 */

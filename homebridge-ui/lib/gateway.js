@@ -33,6 +33,13 @@ const { assembleProfile } = loadDist('services/device-profile.js');
 const { StateGridClient } = loadDist('sgcc/client.js');
 const { renderCompactCard } = loadDist('renderer/card-svg.js');
 const { renderJpeg } = loadDist('renderer/image-renderer.js');
+const {
+  estimateCharge,
+  summarizeSnapshot,
+  maskConsNo,
+  maskPhone,
+  regionFromAddress,
+} = loadDist('services/summary.js');
 
 /** 把异常翻译成前端能判断的结构，避免把堆栈直接甩给用户。 */
 function describeError(error) {
@@ -213,16 +220,37 @@ class UiGateway {
     };
   }
 
-  /** 拉取户号列表（含各户号的最新快照）。 */
+  /** 拉取户号列表（联网，仅点「刷新」时调用），成功后回写缓存。 */
   async accounts() {
     const client = this.ensureClient();
     try {
       await client.ensureLogin();
       this.persistSession(client.currentSession);
-      return { ok: true, accounts: this.accountsOf(client) };
+      const accounts = this.accountsOf(client);
+      this.mergeAccountsCache(accounts);
+      return { ok: true, accounts };
     } catch (error) {
       return { ok: false, ...describeError(error) };
     }
+  }
+
+  /**
+   * 读缓存里的户号列表 + 快照摘要（纯本地，不联网）。
+   * 设置页打开时先渲染这个，避免反复触发国网的短信/密码风控（RK007 超时）。
+   */
+  cachedAccounts() {
+    const cache = this.store.loadAccountsCache();
+    if (!cache || !Array.isArray(cache.accounts)) {
+      return { ok: true, updatedAt: null, accounts: [] };
+    }
+    return { ok: true, updatedAt: cache.updatedAt, accounts: cache.accounts };
+  }
+
+  /** 读缓存里的单户号预览图（纯本地，不联网）。 */
+  cachedPreview(consNo) {
+    const jpeg = this.store.loadCachedPreview(String(consNo));
+    if (!jpeg) return { ok: false, reason: 'error', message: '暂无缓存预览' };
+    return { ok: true, image: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
   }
 
   accountsOf(client) {
@@ -234,9 +262,50 @@ class UiGateway {
       name: account.name || '',
       address: account.address || '',
       consType: account.consType || '',
+      title: this.titleOf(account),
       province: String((session && session.userInfo && session.userInfo.addressProvince) || ''),
       enabled: visibility[account.consNoSrc] !== false,
     }));
+  }
+
+  /** 户号显示名：只取地区，不暴露脱敏真实姓名。 */
+  titleOf(account) {
+    const region = regionFromAddress(account.address || '');
+    return region || `用电 ${account.consNoSrc.slice(-4)}`;
+  }
+
+  /** 把联网拉到的户号元信息合并进缓存，保留已有快照摘要。 */
+  mergeAccountsCache(accounts) {
+    const previous = this.store.loadAccountsCache();
+    const byConsNo = new Map((previous?.accounts || []).map((a) => [a.consNo, a]));
+    for (const account of accounts) {
+      const prev = byConsNo.get(account.consNo);
+      byConsNo.set(account.consNo, {
+        consNo: account.consNo,
+        consNoMasked: account.consNoMasked,
+        name: account.name,
+        address: account.address,
+        consType: account.consType,
+        title: account.title,
+        enabled: account.enabled,
+        lastSuccess: prev?.lastSuccess ?? null,
+        lastError: prev?.lastError ?? null,
+        snapshot: prev?.snapshot ?? null,
+      });
+    }
+    this.store.saveAccountsCache({ updatedAt: Date.now(), accounts: [...byConsNo.values()] });
+  }
+
+  /** 单户号预览完成后，把快照摘要回写进缓存。 */
+  mergeSnapshotCache(consNo, snapshot) {
+    const cache = this.store.loadAccountsCache();
+    if (!cache || !Array.isArray(cache.accounts)) return;
+    const accounts = cache.accounts.map((a) =>
+      a.consNo === consNo
+        ? { ...a, snapshot: summarizeSnapshot(snapshot), lastSuccess: Date.now(), lastError: null }
+        : a,
+    );
+    this.store.saveAccountsCache({ ...cache, accounts, updatedAt: Date.now() });
   }
 
   /** 设置页切换某户号是否生成卡片。 */
@@ -276,52 +345,18 @@ class UiGateway {
         theme,
       };
       const jpeg = await renderJpeg(renderCompactCard(card), { width: 640, quality: 80 });
+      // 回写缓存：预览图 + 快照摘要，供下次打开设置页离线展示。
+      this.store.saveCachedPreview(account.consNoSrc, jpeg);
+      this.mergeSnapshotCache(account.consNoSrc, snapshot);
       return {
         ok: true,
-        snapshot: summarize(snapshot),
+        snapshot: summarizeSnapshot(snapshot),
         image: `data:image/jpeg;base64,${jpeg.toString('base64')}`,
       };
     } catch (error) {
       return { ok: false, ...describeError(error), snapshot: null };
     }
   }
-}
-
-function summarize(snapshot) {
-  return {
-    consNo: snapshot.consNo,
-    latestDailyUsage: snapshot.latestDailyUsage ?? null,
-    latestDailyDate: snapshot.latestDailyDate ?? null,
-    currentMonthUsage: snapshot.currentMonthUsage ?? null,
-    latestMonthUsage: snapshot.latestMonthUsage ?? null,
-    latestMonthCharge: snapshot.latestMonthCharge ?? null,
-    currentYearUsage: snapshot.currentYearUsage ?? null,
-    currentYearCharge: snapshot.currentYearCharge ?? null,
-    balance: snapshot.balance ?? null,
-    amountDue: snapshot.amountDue ?? null,
-    estimate: estimateCharge(snapshot) ?? null,
-    updatedAt: snapshot.updatedAt,
-    seriesDays: snapshot.dailySeries.length,
-  };
-}
-
-/** 与平台层同一条估算规则：用最近结算月的实际均价反推本月。 */
-function estimateCharge(snapshot) {
-  const { latestMonthCharge, latestMonthUsage, currentMonthUsage } = snapshot;
-  if (!latestMonthCharge || !latestMonthUsage || !currentMonthUsage) return undefined;
-  const unitPrice = latestMonthCharge / latestMonthUsage;
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return undefined;
-  return Math.round(currentMonthUsage * unitPrice * 100) / 100;
-}
-
-function maskPhone(value) {
-  const text = String(value);
-  return text.length >= 11 ? `${text.slice(0, 3)}****${text.slice(-4)}` : text;
-}
-
-function maskConsNo(value) {
-  const text = String(value);
-  return text.length > 8 ? `${text.slice(0, 4)}…${text.slice(-4)}` : text;
 }
 
 module.exports = { UiGateway, describeError, estimateCharge };
