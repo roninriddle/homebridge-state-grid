@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import { renderCard, renderCompactCard, renderDetailCard, type CardData } from '../renderer/card-svg.js';
 import { fallbackCardSvg, renderJpeg } from '../renderer/image-renderer.js';
+import { FIELD_META, type FieldKey } from '../renderer/fields.js';
 
 const now = Date.now();
 
@@ -20,6 +21,7 @@ const base: CardData = {
   latestDailyDate: '2026-10-27',
   currentMonthUsage: 391.16,
   monthEstimateCharge: 190.06,
+  latestMonth: '2026-09',
   latestMonthUsage: 600,
   latestMonthCharge: 328.27,
   currentYearUsage: 6297.16,
@@ -65,6 +67,9 @@ async function main(): Promise<void> {
     ['detail-light.jpg', () => renderJpeg(renderDetailCard({ ...base, theme: 'light' }), { width: 1920, quality: 90 })],
     ['detail-dark.jpg', () => renderJpeg(renderDetailCard({ ...base, theme: 'dark' }), { width: 1920, quality: 90 })],
     ['custom-fields.jpg', () => renderJpeg(renderCard({ ...base, theme: 'light', fields: ['balance', 'currentMonthUsage', 'currentYearCharge'] }), { width: 1280 })],
+    ['four-fields.jpg', () => renderJpeg(renderCard({ ...base, fields: ['balance', 'monthEstimateCharge', 'latestMonthUsage', 'latestMonthCharge'] }), { width: 1280 })],
+    ['all-fields.jpg', () => renderJpeg(renderCard({ ...base, fields: Object.keys(FIELD_META) as FieldKey[] }), { width: 1280 })],
+    ['two-fields.jpg', () => renderJpeg(renderCard({ ...base, fields: ['balance', 'monthEstimateCharge'] }), { width: 1280 })],
     ['fallback.jpg', () => renderJpeg(fallbackCardSvg(1280, 720, '数据获取失败 · 最近成功 10月27日 12:00'), { width: 1280 })],
     ['compact-thumb.jpg', () => renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 360 })],
   ];

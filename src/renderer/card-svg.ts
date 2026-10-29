@@ -7,7 +7,7 @@
  * 版式由 `fields` 驱动：
  *  - 第 1 个字段是卡片主数字（大字，账户余额 / 应交电费）；
  *  - 第 2 个字段与主数字并列（大字，默认是本月预估电费）；
- *  - 其余字段进入下方 4 列网格，行数与字号随字段数量自适应。
+ *  - 其余字段进入自适应网格，列数、占位和字号随字段数量调整。
  * 缺数据的字段不隐藏，统一显示「—」，保证布局稳定。
  */
 
@@ -63,102 +63,38 @@ export interface CardData {
 }
 
 interface Palette {
-  bg: string;
-  card: string;
-  stroke: string;
-  text: string;
-  secondary: string;
-  accent: string;
-  divider: string;
+  bg: string; card: string; tile: string; stroke: string; text: string;
+  secondary: string; accent: string; divider: string; accentSoft: string;
 }
-
 const PALETTES: Record<CardTheme, Palette> = {
-  light: {
-    bg: '#F2F2F7',
-    card: '#FFFFFF',
-    stroke: '#E5E5EA',
-    text: '#1C1C1E',
-    secondary: '#8E8E93',
-    accent: '#0A84FF',
-    divider: '#E5E5EA',
-  },
-  dark: {
-    bg: '#000000',
-    card: '#1C1C1E',
-    stroke: '#38383A',
-    text: '#FFFFFF',
-    secondary: '#8E8E93',
-    accent: '#0A84FF',
-    divider: '#38383A',
-  },
+  light: {bg: '#EEF3F6', card: '#FFFFFF', tile: '#F3F7F8', stroke: '#DFE8EC', text: '#18313D', secondary: '#6C818D', accent: '#007F73', divider: '#E5ECEF', accentSoft: '#E6F5F1'},
+  dark: {bg: '#0B1118', card: '#111D29', tile: '#192A38', stroke: '#263C4C', text: '#F1F7FA', secondary: '#94AABA', accent: '#4BDAC2', divider: '#29404F', accentSoft: '#163C3A'},
 };
-
 const FONT = "'PingFang SC', 'Hiragino Sans GB', 'Noto Sans CJK SC', 'Microsoft YaHei', system-ui, sans-serif";
-
-function text(
-  x: number,
-  y: number,
-  content: string,
-  size: number,
-  fill: string,
-  weight = 400,
-  anchor: 'start' | 'middle' | 'end' = 'start',
-): string {
+function text(x: number, y: number, content: string, size: number, fill: string, weight = 400, anchor: 'start' | 'middle' | 'end' = 'start'): string {
   return `<text x="${x}" y="${y}" font-family="${FONT}" font-size="${size}" font-weight="${weight}" fill="${fill}" text-anchor="${anchor}">${escapeXml(content)}</text>`;
 }
-
-/** 粗略估算数字串宽度：数字约 0.62em，小数点约 0.32em（宁宽勿窄）。 */
-function digitWidth(value: string, size: number): number {
-  let width = 0;
-  for (const ch of value) {
-    if (ch === '.') width += size * 0.32;
-    else if (ch === '—' || ch === '-') width += size * 0.5;
-    else width += size * 0.62;
-  }
-  return width;
+function numericWidth(value: string): number {
+  return [...value].reduce((sum, ch) => sum + (ch === '.' || ch === ',' ? .28 : ch === '—' ? .9 : .59), 0);
 }
-
-/** 单位后缀跟着数字走，字号更小、颜色更弱。 */
-function valueWithUnit(
-  x: number,
-  y: number,
-  value: string,
-  unit: string,
-  size: number,
-  fill: string,
-  unitFill: string,
-): string {
-  const unitSize = Math.round(size * 0.42);
-  const offset = Math.round(digitWidth(value, size) + size * 0.14);
-  return (
-    text(x, y, value, size, fill, 600) +
-    text(x + offset, y, unit, unitSize, unitFill, 400)
-  );
+function fittedSize(value: string, desired: number, available: number): number {
+  return Math.max(16, Math.min(desired, Math.floor(available / Math.max(1, numericWidth(value)))));
 }
-
-/** 从 CardData 里按配置顺序取出字段值（缺失字段仍保留，渲染时显示「—」）。 */
+function labelFor(field: FieldValue): string {
+  return field.label + (field.estimated && !/预估|估算/.test(field.label) ? ' · 估算' : '');
+}
 function fieldValues(data: CardData): FieldValue[] {
   const order = data.fields?.length ? data.fields : DEFAULT_FIELD_ORDER;
   const values: Record<FieldKey, number | undefined> = {
-    balance: data.primaryValue,
-    monthEstimateCharge: data.monthEstimateCharge,
-    currentMonthUsage: data.currentMonthUsage,
-    latestDailyUsage: data.latestDailyUsage,
-    latestPeakUsage: data.latestPeakUsage,
-    latestValleyUsage: data.latestValleyUsage,
-    latestFlatUsage: data.latestFlatUsage,
-    latestSharpUsage: data.latestSharpUsage,
-    latestMonthUsage: data.latestMonthUsage,
-    latestMonthCharge: data.latestMonthCharge,
-    currentYearUsage: data.currentYearUsage,
-    currentYearCharge: data.currentYearCharge,
-    monthPeakUsage: data.monthPeakUsage,
-    monthValleyUsage: data.monthValleyUsage,
-    monthFlatUsage: data.monthFlatUsage,
-    monthSharpUsage: data.monthSharpUsage,
-    ladderLevel: data.ladderLevel,
-    penalty: data.penalty,
-    historyOwe: data.historyOwe,
+    balance: data.primaryValue, monthEstimateCharge: data.monthEstimateCharge,
+    currentMonthUsage: data.currentMonthUsage, latestDailyUsage: data.latestDailyUsage,
+    latestPeakUsage: data.latestPeakUsage, latestValleyUsage: data.latestValleyUsage,
+    latestFlatUsage: data.latestFlatUsage, latestSharpUsage: data.latestSharpUsage,
+    latestMonthUsage: data.latestMonthUsage, latestMonthCharge: data.latestMonthCharge,
+    currentYearUsage: data.currentYearUsage, currentYearCharge: data.currentYearCharge,
+    monthPeakUsage: data.monthPeakUsage, monthValleyUsage: data.monthValleyUsage,
+    monthFlatUsage: data.monthFlatUsage, monthSharpUsage: data.monthSharpUsage,
+    ladderLevel: data.ladderLevel, penalty: data.penalty, historyOwe: data.historyOwe,
   };
   return order.map((key) => {
     const meta = FIELD_META[key];
@@ -166,126 +102,95 @@ function fieldValues(data: CardData): FieldValue[] {
     if (key === 'latestDailyUsage' && data.latestDailyDate) label = `用电 · ${formatDayMonth(data.latestDailyDate)}`;
     if (key.startsWith('latest') && key.endsWith('Usage') && key !== 'latestMonthUsage' && key !== 'latestDailyUsage' && data.latestDailyDate) label = `${meta.label.replace('上日', '')} · ${formatDayMonth(data.latestDailyDate)}`;
     if (key === 'currentMonthUsage' && data.currentMonthPartial) label = '当月已取电量 · 部分';
-    if ((key === 'latestMonthUsage' || key === 'latestMonthCharge') && data.latestMonth) label = `${data.latestMonth} ${key === 'latestMonthUsage' ? '用电' : '电费'}`;
     if (key === 'ladderLevel') label = '最近账单阶梯';
-    return { key, label, value: values[key], unit: meta.unit, estimated: meta.estimated };
+    return {key, label, value: values[key], unit: meta.unit, estimated: meta.estimated};
   });
 }
-
-function formatFieldValue(field: FieldValue): string {
-  if (field.unit === '元') return formatMoney(field.value);
-  if (field.unit === '档') return formatNumber(field.value, 0);
-  return formatUsage(field.value);
+function formatField(field: FieldValue): string {
+  return field.unit === '元' ? formatMoney(field.value) : field.unit === '档' ? formatNumber(field.value, 0) : formatUsage(field.value);
 }
 
-function unitSuffix(field: FieldValue): string {
-  return field.unit;
+export interface MetricLayout { x: number; y: number; width: number; height: number; valueSize: number; }
+/** 最后一行也铺满可用宽度，删去指标后不保留空槽。 */
+export function metricLayout(count: number): MetricLayout[] {
+  if (count <= 0) return [];
+  const columns = count <= 3 ? count : count === 4 ? 2 : count <= 6 ? 3 : count <= 8 ? 4 : count === 9 ? 3 : 4;
+  const rows = Math.ceil(count / columns);
+  const gap = 14;
+  const height = (280 - gap * (rows - 1)) / rows;
+  const valueSize = rows === 1 ? (count === 1 ? 88 : count === 2 ? 84 : 76) : rows === 2 ? (columns === 2 ? 66 : columns === 3 ? 62 : 56) : rows === 3 ? (columns === 3 ? 50 : 46) : rows === 4 ? 34 : 25;
+  return Array.from({length: count}, (_, index) => {
+    const row = Math.floor(index / columns);
+    const inRow = Math.min(columns, count - row * columns);
+    const width = (1120 - gap * (inRow - 1)) / inRow;
+    return {x: 80 + (index % columns) * (width + gap), y: 368 + row * (height + gap), width, height, valueSize};
+  });
 }
-
-/** 主数字 / 并列数字：元带「¥」前缀，其余带单位后缀。 */
-function heroField(field: FieldValue | undefined, x: number, p: Palette): string {
-  if (!field) {
-    return text(x, 336, '—', 84, p.secondary, 600);
-  }
-  const label = field.label + (field.estimated ? ' · 估算' : '');
-  if (field.unit === '元') {
-    return (
-      text(x, 296, '¥', 40, p.secondary, 400) +
-      text(x + 46, 336, formatMoney(field.value), 96, p.text, 600) +
-      text(x, 384, label, 30, p.secondary, 400)
-    );
-  }
-  const unit = field.unit === '档' ? '档' : 'kWh';
-  return (
-    valueWithUnit(x, 336, formatFieldValue(field), unit, 88, p.text, p.secondary) +
-    text(x, 384, label, 30, p.secondary, 400)
-  );
+function heroSize(field: FieldValue, width: number, expanded: boolean): number {
+  const reserve = field.unit === '元' ? 46 : 80;
+  return fittedSize(formatField(field), expanded ? 148 : 112, width - reserve);
 }
-
-/** 网格格：小字标签 + 数值（带单位后缀）。 */
-function tile(
-  field: FieldValue | undefined,
-  x: number,
-  y: number,
-  valueSize: number,
-  p: Palette,
-): string {
-  if (!field) return '';
-  const label = field.label + (field.estimated ? ' · 估算' : '');
-  const labelSize = Math.round(valueSize * 0.5);
-  return (
-    text(x, y, label, labelSize, p.secondary, 400) +
-    valueWithUnit(x, y + valueSize * 1.15, formatFieldValue(field), unitSuffix(field), valueSize, p.text, p.secondary)
-  );
+function heroField(field: FieldValue, x: number, width: number, expanded: boolean, p: Palette): string {
+  const size = heroSize(field, width, expanded);
+  const labelY = expanded ? 282 : 185;
+  const valueY = expanded ? 447 : 306;
+  const value = formatField(field);
+  const label = labelFor(field);
+  const numberX = x + (field.unit === '元' ? 42 : 0);
+  const suffix = field.unit === '元' ? '' : text(numberX + numericWidth(value) * size + 12, valueY, field.unit, 25, p.secondary);
+  return `<g data-role="hero" data-field="${field.key}" data-value-size="${size}">
+${text(x, labelY, label, 26, p.secondary, 500)}
+${field.unit === '元' ? text(x, valueY - 4, '¥', 35, p.secondary, 500) : ''}
+${text(numberX, valueY, value, size, p.text, 600)}${suffix}
+</g>`;
 }
-
+function tile(field: FieldValue, box: MetricLayout, heroLimit: number, p: Palette): string {
+  const padding = box.height >= 120 ? 24 : 16;
+  const value = formatField(field);
+  const desired = Math.min(box.valueSize, heroLimit - 8);
+  const size = fittedSize(value, desired, box.width - 2 * padding - 54);
+  const labelSize = box.height >= 150 ? 24 : box.height >= 100 ? 22 : box.height >= 75 ? 18 : box.height >= 55 ? 15 : 13;
+  const labelY = box.y + box.height * (box.height >= 150 ? .30 : .28);
+  const valueY = box.y + box.height * (box.height >= 150 ? .72 : box.height >= 100 ? .79 : box.height >= 75 ? .82 : .90);
+  const unitSize = Math.max(12, Math.round(size * .30));
+  const label = labelFor(field);
+  const fittedLabel = Math.min(labelSize, (box.width - 2 * padding) / Math.max(1, Array.from(label).length));
+  return `<g data-role="metric" data-field="${field.key}" data-value-size="${size}" data-width="${box.width}" data-height="${box.height}">
+<rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="14" fill="${p.tile}"/>
+${text(box.x + padding, labelY, label, fittedLabel, p.secondary, 500)}
+${text(box.x + padding, valueY, value, size, p.text, 600)}
+${text(box.x + padding + numericWidth(value) * size + 10, valueY, field.unit, unitSize, p.secondary)}
+</g>`;
+}
 export function renderCard(data: CardData): string {
   const p = PALETTES[data.theme ?? 'light'];
-  const width = 1280;
-  const height = 720;
-  const cardX = 48;
-  const cardY = 48;
-  const cardW = width - cardX * 2;
-  const cardH = height - cardY * 2;
-  const innerX = cardX + 56;
-  const rightEdge = cardX + cardW - 56;
-  const innerW = rightEdge - innerX;
-
-  const statusText = data.staleNote ? data.staleNote : `更新 ${formatClock(data.updatedAt)}`;
   const fields = fieldValues(data);
-  const hero = fields.slice(0, 2);
-  const tiles = fields.slice(2);
-
-  // 主数字区：第一个字段占左半，第二个字段（若有）并列右半。
-  const midX = width / 2;
-  const heroMarkup = [
-    heroField(hero[0], innerX, p),
-    hero[1]
-      ? `<line x1="${midX - 48}" y1="200" x2="${midX - 48}" y2="392" stroke="${p.divider}" stroke-width="1"/>` +
-        heroField(hero[1], midX, p)
-      : '',
-  ].join('');
-
-  // 网格：4 列，行数与字号随字段数量自适应。
-  const columns = 4;
-  const gridTop = 420;
-  const gridBottom = cardY + cardH - 40;
-  const gridHeight = gridBottom - gridTop;
-  const rows = Math.max(1, Math.ceil(tiles.length / columns));
-  const rowHeight = Math.min(88, gridHeight / rows);
-  const valueSize = rowHeight > 78 ? 46 : rowHeight > 60 ? 38 : 32;
-  const columnWidth = innerW / columns;
-
-  const tileMarkup = tiles
-    .map((field, index) => {
-      const col = index % columns;
-      const row = Math.floor(index / columns);
-      const x = innerX + col * columnWidth;
-      const y = gridTop + row * rowHeight;
-      return tile(field, x, y, valueSize, p);
-    })
-    .join('');
-
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-<rect width="${width}" height="${height}" fill="${p.bg}"/>
-<rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="44" fill="${p.card}" stroke="${p.stroke}" stroke-width="1"/>
-<circle cx="${innerX + 10}" cy="110" r="10" fill="${p.accent}"/>
-${text(innerX + 34, 122, data.title, Math.min(40, Math.floor(650 / Math.max(1, Array.from(data.title).length))), p.text, 600)}
-${data.region ? text(innerX + 34, 150, data.region, 20, p.secondary, 400) : ''}
-${text(rightEdge, 118, statusText, 26, p.secondary, 400, 'end')}
-<line x1="${innerX}" y1="164" x2="${rightEdge}" y2="164" stroke="${p.divider}" stroke-width="1"/>
-${heroMarkup}
-<line x1="${innerX}" y1="408" x2="${rightEdge}" y2="408" stroke="${p.divider}" stroke-width="1"/>
-${tileMarkup}
+  const heroes = fields.slice(0, 2);
+  const metrics = fields.slice(2);
+  const expanded = !metrics.length;
+  const heroWidth = heroes.length === 1 ? 1120 : 518;
+  const heroLimit = Math.min(...heroes.map((field) => heroSize(field, heroWidth, expanded)));
+  const status = data.staleNote || `更新 ${formatClock(data.updatedAt)}`;
+  const statusWidth = Math.min(476, 46 + [...status].reduce((sum, ch) => sum + (/[^\x00-\xff]/.test(ch) ? 20 : 12), 0));
+  const statusX = 1200 - statusWidth;
+  const titleSize = Math.min(34, 520 / Math.max(1, Array.from(data.title).length));
+  const layout = metricLayout(metrics.length);
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
+<rect width="1280" height="720" fill="${p.bg}"/>
+<rect x="32" y="28" width="1216" height="664" rx="36" fill="${p.card}" stroke="${p.stroke}"/>
+<rect x="80" y="66" width="44" height="44" rx="13" fill="${p.accentSoft}"/>
+<path d="M105 74 L91 91 H101 L97 104 L113 85 H103 Z" fill="${p.accent}"/>
+${text(138, 98, data.title, titleSize, p.text, 600)}
+${data.region ? text(138, 121, data.region, 17, p.secondary) : ''}
+<rect x="${statusX}" y="70" width="${statusWidth}" height="38" rx="19" fill="${p.tile}"/>
+<circle cx="${statusX + 17}" cy="89" r="4" fill="${data.staleNote ? '#D99A27' : p.accent}"/>
+${text(1185, 96, status, data.staleNote ? 18 : 20, p.secondary, 400, 'end')}
+<line x1="80" y1="137" x2="1200" y2="137" stroke="${p.divider}"/>
+${heroes.map((field, index) => heroField(field, index ? 682 : 80, heroWidth, expanded, p)).join('')}
+${heroes.length > 1 ? `<line x1="640" y1="${expanded ? 220 : 174}" x2="640" y2="${expanded ? 510 : 316}" stroke="${p.divider}"/>` : ''}
+${metrics.length ? `<line x1="80" y1="344" x2="1200" y2="344" stroke="${p.divider}"/>` : ''}
+${metrics.map((field, index) => tile(field, layout[index], heroLimit, p)).join('')}
 </svg>`;
 }
-
-/** 兼容旧入口：首页缩略图与视频流都用完整字段卡片。 */
-export function renderCompactCard(data: CardData): string {
-  return renderCard(data);
-}
-
-/** 兼容旧入口：详情看板与首页卡片共用同一套字段版式，仅渲染尺寸不同。 */
-export function renderDetailCard(data: CardData): string {
-  return renderCard(data);
-}
+export function renderCompactCard(data: CardData): string { return renderCard(data); }
+export function renderDetailCard(data: CardData): string { return renderCard(data); }

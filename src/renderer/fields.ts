@@ -37,7 +37,7 @@ export interface FieldMeta {
   /** 卡片上显示的标题。balance 的标题会按户号类型动态改为「应交电费」。 */
   label: string;
   unit: FieldUnit;
-  /** 是否为估算值，渲染时标题会追加「· 估算」。 */
+  /** 是否为估算值，仅在标题未包含预估含义时追加标记。 */
   estimated?: boolean;
 }
 

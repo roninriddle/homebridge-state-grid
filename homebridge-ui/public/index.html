@@ -6,17 +6,17 @@
     <title>网上国网 · 用电卡片</title>
     <style>
       :root {
-        --bg: #f4f5f7;
+        --bg: #f3f7f8;
         --panel: #ffffff;
-        --text: #1c1f23;
-        --muted: #6b7280;
-        --line: #e3e6ea;
-        --accent: #c8102e;
-        --accent-soft: #fdecef;
+        --text: #18313d;
+        --muted: #70838d;
+        --line: #e0e9ed;
+        --accent: #007f73;
+        --accent-soft: #e6f5f1;
         --ok: #15803d;
         --warn: #b45309;
         --err: #b91c1c;
-        --radius: 12px;
+        --radius: 16px;
       }
       @media (prefers-color-scheme: dark) {
         :root {
@@ -25,8 +25,8 @@
           --text: #eceff3;
           --muted: #9aa3ae;
           --line: #313640;
-          --accent: #ff5a6e;
-          --accent-soft: #3a2126;
+          --accent: #4bdac2;
+          --accent-soft: #163c3a;
           --ok: #4ade80;
           --warn: #fbbf24;
           --err: #f87171;
@@ -45,22 +45,24 @@
         background: var(--panel);
         border: 1px solid var(--line);
         border-radius: var(--radius);
-        padding: 18px 20px;
+        padding: 22px;
+        box-shadow: 0 4px 24px rgba(24, 49, 61, .035);
       }
       h2 { margin: 0 0 4px; font-size: 15px; font-weight: 600; letter-spacing: .01em; }
       .hint { margin: 0 0 14px; color: var(--muted); font-size: 12.5px; }
 
-      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+      .tabs { display: flex; gap: 6px; padding: 5px; border: 1px solid var(--line); background: var(--panel); border-radius: 14px; }
       .tab {
         padding: 10px 16px;
         border: none;
-        border-bottom: 2px solid transparent;
+        border-radius: 9px;
+        flex: 1;
         background: transparent;
         color: var(--muted);
         cursor: pointer;
         font-size: 14px;
       }
-      .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+      .tab.active { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 
       .status { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
       .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
@@ -110,18 +112,22 @@
       .tip.err { background: transparent; border-color: var(--err); color: var(--err); }
       .hidden { display: none !important; }
 
-      .acct { border-top: 1px solid var(--line); padding: 14px 0; }
-      .acct:first-of-type { border-top: none; }
-      .acct-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-      .acct-name { font-weight: 600; }
+      .acct { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 18px; margin: 14px 0; }
+      .acct:first-of-type { margin-top: 0; }
+      .acct-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+      .acct-identity { flex: 1; min-width: 180px; }
+      .acct-number { font-variant-numeric: tabular-nums; letter-spacing: .02em; overflow-wrap: anywhere; }
+      .acct-address { color: var(--muted); margin-top: 5px; overflow-wrap: anywhere; font-size: 12px; }
+      .acct-updated { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+      .acct-name { font-weight: 600; font-size: 16px; margin-bottom: 3px; }
       .acct-sub { color: var(--muted); font-size: 12.5px; }
       .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
       .switch input { width: auto; accent-color: var(--accent); cursor: pointer; }
       .switch-label { color: var(--muted); font-size: 12.5px; }
-      .acct-body { display: grid; grid-template-columns: 1fr 260px; gap: 16px; margin-top: 12px; align-items: start; }
+      .acct-body { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(220px, 1fr); gap: 16px; margin-top: 12px; align-items: start; }
       @media (max-width: 640px) { .acct-body { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
-      .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
-      .metric { border: 1px solid var(--line); border-radius: 10px; padding: 9px 11px; }
+      .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(105px, 1fr)); gap: 10px; }
+      .metric { background: var(--bg); border-radius: 10px; padding: 11px 12px; min-width: 0; }
       .metric .k { color: var(--muted); font-size: 11.5px; }
       .metric .v { font-size: 16px; font-variant-numeric: tabular-nums; margin-top: 2px; }
       .metric .v small { font-size: 11px; color: var(--muted); margin-left: 2px; }
@@ -133,24 +139,43 @@
       code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
       select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; }
-      .field-editor { display: grid; grid-template-columns: minmax(200px, .9fr) minmax(280px, 1.1fr); gap: 22px; align-items: start; }
-      .draft-preview { position: sticky; top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .field-editor { display: grid; grid-template-columns: minmax(0, .95fr) minmax(0, 1.05fr); gap: 18px; align-items: start; }
+      .draft-preview { position: sticky; top: 12px; border: 1px solid var(--line); background: var(--bg); border-radius: 16px; padding: 14px; min-width: 0; }
       .draft-preview h3 { margin: 0 0 4px; font-size: 14px; }
-      .draft-preview img { width: 100%; aspect-ratio: 16/9; display: block; border-radius: 10px; margin-top: 14px; background: var(--bg); }
+      .draft-preview img { width: 100%; aspect-ratio: 16/9; display: block; border-radius: 12px; margin-top: 12px; background: var(--bg); }
       .draft-preview .preview-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
       @media (max-width: 640px) { .field-editor { grid-template-columns: 1fr; } .draft-preview { position: static; grid-row: 1; } }
-      .field-groups { display: grid; gap: 16px; margin-top: 14px; }
+      .field-groups { display: grid; gap: 20px; }
       .field-group h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 500; }
       .field-list { display: flex; flex-direction: column; gap: 8px; }
       .field-row {
         display: flex; align-items: center; gap: 10px;
-        padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
+        padding: 11px 10px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); min-width: 0;
       }
-      .field-row .fl-label { font-weight: 500; }
-      .field-row .fl-unit { color: var(--muted); font-size: 12px; }
-      .field-row .fl-actions { margin-left: auto; display: flex; gap: 6px; }
-      .field-row .fl-actions button { padding: 4px 10px; font-size: 12.5px; }
+      .field-row .fl-label { font-weight: 500; flex: 1; min-width: 0; font-size: 12px; }
+      .field-row .fl-unit { color: var(--muted); font-size: 10px; }
+      .field-row .fl-actions { margin-left: auto; display: flex; gap: 3px; flex: none; }
+      .field-row .fl-actions button { padding: 3px 6px; min-width: 25px; font-size: 12px; border-radius: 7px; }
       .field-empty { color: var(--muted); font-size: 12.5px; padding: 8px 2px; }
+      .field-row[data-rank="hero"] { border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); background: var(--accent-soft); }
+      .fl-rank { flex: none; width: 22px; height: 22px; border-radius: 7px; background: var(--bg); color: var(--muted); display: grid; place-items: center; font-size: 11px; font-variant-numeric: tabular-nums; }
+      .field-row[data-rank="hero"] .fl-rank { color: var(--accent); background: var(--panel); }
+      .preview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+      .preview-head select { width: auto; max-width: 145px; padding: 5px 7px; font-size: 11px; }
+      .preview-state { display: inline-block; color: var(--accent); background: var(--accent-soft); padding: 3px 8px; border-radius: 20px; font-size: 11px; margin: 6px 0 0; }
+      .identity-card { margin: 9px 0 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+      .identity-head { display: flex; justify-content: space-between; align-items: start; gap: 8px; font-size: 13px; }
+      .identity-state { font-size: 10px; color: var(--muted); background: var(--bg); border-radius: 8px; padding: 2px 5px; flex: none; }
+      .identity-card dl { margin: 8px 0 0; display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 5px 8px; font-size: 11px; }
+      .identity-card dt { color: var(--muted); } .identity-card dd { margin: 0; overflow-wrap: anywhere; }
+      .appearance-details, .more-metrics { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+      details summary { cursor: pointer; font-size: 12px; color: var(--muted); padding: 3px 0; }
+      .appearance-details button { width: 100%; margin-top: 9px; font-size: 12px; }
+      .more-metrics { grid-column: 1 / -1; }
+      .more-metrics .metrics { margin-top: 10px; }
+      .field-toolbar { position: sticky; top: 0; z-index: 1; background: var(--panel); padding: 4px 0 14px; margin-bottom: 6px; align-items: center; }
+      .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+      @media (max-width: 480px) { body {padding: 12px;} .panel {padding: 15px;} .tab {padding: 9px 6px; font-size: 12px;} .field-toolbar {position: static;} }
     </style>
   </head>
   <body>
@@ -242,14 +267,15 @@
         <section class="panel">
           <h2>卡片指标</h2>
           <p class="hint">
-            勾选并排序卡片上要显示的指标：第 1 项是主数字，第 2 项与之并列，其余进入下方网格。
+            勾选并排序卡片上要显示的指标：第 1 项是主数字，第 2 项与之并列，其余自动调整列数与字号。顶部两项始终最大。
             不在列表里 = 不显示。保存后主进程会在几秒内自动重新渲染卡片，无需重启 Homebridge。
           </p>
-          <div class="actions" style="margin-top: 0">
+          <div class="actions field-toolbar" style="margin-top: 0">
             <button class="primary" id="fieldsSaveBtn">保存指标</button>
             <button id="fieldsResetBtn">恢复默认</button>
             <span class="meta" id="fieldsMeta"></span>
           </div>
+          <div class="tip hidden" id="fieldsTip"></div>
           <div class="field-editor"><div class="field-groups">
             <div class="field-group">
               <h3>已显示（按顺序）</h3>
@@ -261,19 +287,22 @@
             </div>
           </div>
           <aside class="draft-preview">
-            <h3>实时预览</h3>
-            <p class="preview-note">调整指标后即时重绘，保存后应用到家庭卡片。</p>
-            <label for="previewAccount">预览户号</label><select id="previewAccount"><option value="">模拟卡片</option></select>
-            <label for="cameraName">摄像头名称（当前户号）</label><input id="cameraName" maxlength="32" placeholder="国家电网" value="国家电网" />
-            <label class="switch"><input type="checkbox" id="showRegion" /><span>显示卡片顶部的省市区</span></label>
-            <button id="appearanceSaveBtn" disabled>保存名称与地区显示</button>
-            <label for="previewTheme">预览主题</label><select id="previewTheme"><option value="">跟随正式设置</option><option value="light">浅色</option><option value="dark">深色</option></select>
+            <div class="preview-head"><h3>卡片预览</h3><label class="sr-only" for="previewTheme">预览主题</label><select id="previewTheme"><option value="">跟随正式设置</option><option value="light">浅色</option><option value="dark">深色</option></select></div>
+            <p class="preview-state" id="draftState" aria-live="polite">正在载入…</p>
             <img id="draftImage" alt="卡片指标实时预览" />
             <p class="preview-note" id="draftSource" aria-live="polite">正在读取本地缓存…</p>
-            <p class="preview-note" id="draftState" aria-live="polite">指标尚未修改</p>
-            <p class="preview-note">名称和地区显示按户号保存；指标顺序由“保存指标”应用。预览主题仅用于查看效果。无缓存时明确标注模拟数据。</p>
+            <label for="previewAccount">预览户号</label><select id="previewAccount"><option value="">模拟卡片</option></select>
+            <div class="identity-card" id="previewIdentity">
+              <div class="identity-head"><strong id="previewOwner">暂无户号信息</strong><span class="identity-state" id="previewEnabled">模拟预览</span></div>
+              <dl><dt>户号</dt><dd class="acct-number" id="previewNumber">—</dd><dt>地址</dt><dd id="previewAddress">—</dd></dl>
+            </div>
+            <details class="appearance-details"><summary>摄像头名称与地区显示</summary>
+              <label for="cameraName">摄像头名称（当前户号）</label><input id="cameraName" maxlength="32" placeholder="国家电网" value="国家电网" />
+              <label class="switch"><input type="checkbox" id="showRegion" /><span>显示卡片顶部的省市区</span></label>
+              <button id="appearanceSaveBtn" disabled>保存名称与地区显示</button>
+            </details>
+            <p class="preview-note">指标编辑后点击“保存指标”应用。预览使用本地缓存。</p>
           </aside></div>
-          <div class="tip hidden" id="fieldsTip"></div>
         </section>
       </div>
     </div>
@@ -320,20 +349,31 @@
       // 快照摘要 → 指标网格（缓存与联网刷新共用同一字段结构）。
       function metricsHtml(s) {
         const balanceVal = s.balance != null ? s.balance : s.amountDue;
-        const balanceLabel = s.balance != null ? '余额' : '应交电费';
-        return [
-          metric(balanceLabel, fmt(balanceVal, '元', 2)),
-          metric('上日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
+        const basics = [
+          metric(s.balance != null ? '账户余额' : '应交电费', fmt(balanceVal, '元', 2)),
+          metric('本月预估电费', fmt(s.estimate, '元', 2)),
           metric('当月用电', fmt(s.currentMonthUsage, 'kWh', 2)),
-          metric('本月估算', fmt(s.estimate, '元', 2)),
+          metric('上日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
+          metric('上月用电', fmt(s.latestMonthUsage, 'kWh', 2)),
           metric('上月电费', fmt(s.latestMonthCharge, '元', 2)),
+          metric('年累计用电', fmt(s.currentYearUsage, 'kWh', 2)),
           metric('年累计电费', fmt(s.currentYearCharge, '元', 2)),
-        ].join('');
+        ];
+        const extra = [
+          ['上日峰用电', s.latestPeakUsage, 'kWh'], ['上日谷用电', s.latestValleyUsage, 'kWh'],
+          ['上日平用电', s.latestFlatUsage, 'kWh'], ['上日尖用电', s.latestSharpUsage, 'kWh'],
+          ['当月峰用电', s.monthPeakUsage, 'kWh'], ['当月谷用电', s.monthValleyUsage, 'kWh'],
+          ['当月平用电', s.monthFlatUsage, 'kWh'], ['当月尖用电', s.monthSharpUsage, 'kWh'],
+          ['最近账单阶梯', s.ladderLevel, '档'], ['违约金', s.penalty, '元'], ['历史欠费', s.historyOwe, '元'],
+        ].map(([label, value, unit]) => metric(label, fmt(value, unit, unit === '档' ? 0 : 2))).join('');
+        return basics.join('') + `<details class="more-metrics"><summary>查看其余 11 项指标</summary><div class="metrics">${extra}</div></details>`;
       }
 
       function accountHtml(a, fromCache) {
         if (!/^[\w-]{1,128}$/.test(String(a.consNo))) return '';
-        const name = escapeHtml(a.title || a.name || '未命名户号');
+        const name = escapeHtml(a.name || '接口未提供户名');
+        const updated = a.lastSuccess || a.snapshot?.updatedAt;
+        const updatedText = updated ? '最近成功 ' + new Date(updated).toLocaleString('zh-CN', {hour12: false}) : '尚无成功更新';
         const hasSnapshot = a.snapshot && typeof a.snapshot === 'object';
         const metricsContent = hasSnapshot
           ? metricsHtml(a.snapshot)
@@ -343,9 +383,11 @@
         return `
           <div class="acct" data-consno="${a.consNo}">
             <div class="acct-head">
-              <span class="acct-name">${name}</span>
-              <span class="acct-sub">${escapeHtml(a.consNoMasked)}${a.consType ? ' · ' + escapeHtml(a.consType) : ''}</span>
-              ${a.address ? `<span class="acct-sub">${escapeHtml(a.address)}</span>` : ''}
+              <div class="acct-identity"><div class="acct-name">${name}</div>
+                <div class="acct-sub acct-number">户号 ${escapeHtml(a.consNo)}</div>
+                <div class="acct-address">${escapeHtml(a.address || '接口未提供用电地址')}</div>
+                <div class="acct-updated">${escapeHtml(updatedText)}${a.lastError ? ' · 最近更新失败' : ''}</div>
+              </div>
               <label class="switch" style="margin-left: auto">
                 <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAccount('${a.consNo}', this.checked)" />
                 <span class="switch-label">${a.enabled ? '已启用' : '已停用'}</span>
@@ -677,6 +719,11 @@
           if (result.appearance) { $('cameraName').value = result.appearance.name; $('showRegion').checked = result.appearance.showRegion; }
           $('appearanceSaveBtn').disabled = !selected;
           updateDraftState();
+          const identity = result.account;
+          $('previewOwner').textContent = identity?.name || '暂无户号信息';
+          $('previewNumber').textContent = identity?.consNo || '—';
+          $('previewAddress').textContent = identity?.address || '—';
+          $('previewEnabled').textContent = identity ? (identity.enabled ? '已启用' : '已停用') : '模拟预览';
           $('draftImage').src = result.image;
           $('draftSource').textContent = result.source === 'sample' ? '模拟数据 · 仅供排版预览' : '本地缓存 · 最近成功 ' + new Date(result.updatedAt).toLocaleString('zh-CN', {hour12: false});
         } catch (error) { if (sequence === previewSequence) $('draftSource').textContent = error.message || '预览失败'; }
@@ -695,13 +742,14 @@
               .map((key, i) => {
                 const f = fieldMetaOf(key);
                 return `
-              <div class="field-row">
+              <div class="field-row" data-rank="${i < 2 ? 'hero' : 'metric'}">
+                <span class="fl-rank" title="${i < 2 ? '顶部主指标' : '下方指标'}">${i + 1}</span>
                 <span class="fl-label">${f.label}</span>
                 <span class="fl-unit">${f.unit || ''}</span>
                 <span class="fl-actions">
                   <button onclick="moveField(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
                   <button onclick="moveField(${i}, 1)" ${i === fieldActive.length - 1 ? 'disabled' : ''} title="下移">↓</button>
-                  <button onclick="removeField(${i})" ${fieldActive.length === 1 ? 'disabled' : ''} title="移除">移除</button>
+                  <button onclick="removeField(${i})" ${fieldActive.length === 1 ? 'disabled' : ''} title="移除" aria-label="移除${f.label}">×</button>
                 </span>
               </div>`;
               })
