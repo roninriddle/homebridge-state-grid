@@ -103,6 +103,9 @@
       .acct-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
       .acct-name { font-weight: 600; }
       .acct-sub { color: var(--muted); font-size: 12.5px; }
+      .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+      .switch input { width: auto; accent-color: var(--accent); cursor: pointer; }
+      .switch-label { color: var(--muted); font-size: 12.5px; }
       .acct-body { display: grid; grid-template-columns: 1fr 260px; gap: 16px; margin-top: 12px; align-items: start; }
       @media (max-width: 640px) { .acct-body { grid-template-columns: 1fr; } .row { grid-template-columns: 1fr; } }
       .metrics { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; }
@@ -272,6 +275,10 @@
               <span class="acct-name">${a.name || '未命名户号'}</span>
               <span class="acct-sub">${a.consNoMasked}${a.consType ? ' · ' + a.consType : ''}</span>
               ${a.address ? `<span class="acct-sub">${a.address}</span>` : ''}
+              <label class="switch" style="margin-left: auto">
+                <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAccount('${a.consNo}', this.checked)" />
+                <span class="switch-label">${a.enabled ? '已启用' : '已停用'}</span>
+              </label>
             </div>
             <div class="acct-body">
               <div class="metrics" id="m-${a.consNo}">
@@ -283,6 +290,19 @@
           )
           .join('');
         for (const account of currentAccounts) void loadPreview(account.consNo);
+      }
+
+      async function toggleAccount(consNo, enabled) {
+        try {
+          const result = await bridge.request('/visibility', { consNo, enabled });
+          if (!result.ok) showTip('accountsTip', result.message || '切换失败', 'err');
+          else {
+            const account = currentAccounts.find((a) => a.consNo === consNo);
+            if (account) account.enabled = enabled;
+          }
+        } catch (error) {
+          showTip('accountsTip', error.message || String(error), 'err');
+        }
       }
 
       async function loadPreview(consNo) {

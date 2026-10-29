@@ -10,7 +10,7 @@
 
 ## 它长什么样
 
-每个户号对应一路摄像头，卡片顶部是「账户余额/应交电费」主数字，右侧并列「本月预估电费」，下方网格展示其余指标（当月用电 / 上日用电 / 上月用电 / 年累计用电 / 年累计电费 / 上月电费）。显示哪些指标、按什么顺序，全都在设置页的「卡片指标」里图形化配置。数据每 6～24 小时刷新一次，卡片上的时间戳就是最近一次成功的时间。
+每个户号对应一路摄像头，卡片顶部是「账户余额/应交电费」主数字，右侧并列「本月预估电费」，下方 4 列网格展示其余指标。插件内置 19 个指标：账户余额、本月预估电费、当月用电、上日用电、上日峰/谷/平/尖用电、当月峰/谷/平/尖用电、上月用电、上月电费、年累计用电、年累计电费、当前阶梯、违约金、历史欠费。显示哪些指标、按什么顺序，全都在设置页的「卡片指标」里图形化配置（可拖拽排序）。数据每 6～24 小时刷新一次，卡片上的时间戳就是最近一次成功的时间。
 
 | 浅色 | 深色 |
 | --- | --- |
@@ -53,7 +53,7 @@ npm install -g homebridge-state-grid
 | `updateIntervalHours` | 刷新周期，范围 6～24 | `12` |
 | `theme` | 卡片主题 `light` / `dark` | `light` |
 | `snapshotWidth` / `snapshotHeight` | 快照尺寸 | `1280` / `720` |
-| `fields[]` | 卡片指标显示与顺序（`balance` / `monthEstimateCharge` / `currentMonthUsage` / `latestDailyUsage` / `latestMonthUsage` / `currentYearUsage` / `currentYearCharge` / `latestMonthCharge`） | 全部 8 项 |
+| `fields[]` | 卡片指标显示与顺序，共 19 个可选（`balance` / `monthEstimateCharge` / `currentMonthUsage` / `latestDailyUsage` / 分时 `latestPeak/Valley/Flat/SharpUsage` / `latestMonthUsage` / `latestMonthCharge` / `currentYearUsage` / `currentYearCharge` / `monthPeak/Valley/Flat/SharpUsage` / `ladderLevel` / `penalty` / `historyOwe`） | 12 项默认 |
 | `accounts[]` | 户号级配置：`consNo`、`title`、`enabled` | 全部启用 |
 
 `consNo` 填接口返回的**原始户号**（`consNoSrc`）。设置页「读取户号」时会把可用户号打印出来，照抄即可。
@@ -68,7 +68,7 @@ npm install -g homebridge-state-grid
 
 1. 插件设置页 → 填手机号 → **密码登录**，或点 **短信验证码登录**（无需密码）
 2. 若返回 `4006`（新设备校验）→ **发送验证码** → 填入 6 位码 → **提交**
-3. 登录成功后点 **读取户号**，逐个确认卡片预览是否正确
+3. 登录成功后点 **读取户号**，逐个确认卡片预览；每个户号右上角有**启用开关**，关闭后该户号不会生成摄像头卡片
 4. 保存设置 → 重启 Homebridge → 在「家庭」App 里添加 Homebridge
 
 > 💡 密码登录若报 `RK007 网络连接超时`，多半是密码过于简单被风控拒绝，改用**短信验证码登录**即可绕过，或到 App 里把密码改成复杂密码。
@@ -92,7 +92,7 @@ npm install -g homebridge-state-grid
 
 **1. 设备指纹必须稳定。** 32 字节种子经 HMAC-SHA256 派生机型、版本、传感器、性能上下文等全部设备特征；同一台机器上每次启动都必须得到同一份指纹，否则服务端判定为新设备。所以种子落盘、token 缓存 4 小时（对应 App 行为）。
 
-**2. 协议正确性靠跨语言对拍。** `tools/gen-golden.py` 直接调用上游 Python 生成期望值，`tests/golden.test.ts` 逐字节比对 TS 实现——45 项测试里有 17 项是这种黄金向量，涵盖 SM4/SM3/SM2 信封、64 位哈希、JCE 序列化、XXTEA、mode-0/1 token。
+**2. 协议正确性靠跨语言对拍。** `tools/gen-golden.py` 直接调用上游 Python 生成期望值，`tests/golden.test.ts` 逐字节比对 TS 实现——46 项测试里有 17 项是这种黄金向量，涵盖 SM4/SM3/SM2 信封、64 位哈希、JCE 序列化、XXTEA、mode-0/1 token。
 
 **3. 少一个原生依赖就少一半安装故障。** SVG 栅格化选 resvg（预编译二进制）而不是 node-canvas（cairo/pango）；PNG→JPEG 复用已有的 ffmpeg 而不是再引一个 JS 编码器。装不上的插件等于没写。
 
@@ -129,7 +129,7 @@ npm install -g homebridge-state-grid
 ```bash
 npm install
 npm run build      # tsc，含类型检查
-npm test           # 45 项：黄金向量 / 设备档案 / 摄像头 / 渲染 / DEFLATE
+npm test           # 46 项：黄金向量 / 设备档案 / 摄像头 / 渲染 / DEFLATE
 npm run probe      # 设置页链路自测（不联网、不需要 Homebridge）
 npm run demo       # 生成 preview/*.jpg 样张
 ```

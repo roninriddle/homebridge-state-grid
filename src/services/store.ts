@@ -214,4 +214,15 @@ export class PluginStore {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
     return dir;
   }
+
+  /** 户号显示开关（设置页「户号与卡片预览」里的启用/停用）。 */
+  loadVisibility(): Record<string, boolean> {
+    return readJson<Record<string, boolean>>(join(this.dir, 'visibility.json')) ?? {};
+  }
+
+  setAccountVisibility(consNo: string, enabled: boolean): void {
+    const map = this.loadVisibility();
+    map[consNo] = enabled;
+    writeJson(join(this.dir, 'visibility.json'), map);
+  }
 }

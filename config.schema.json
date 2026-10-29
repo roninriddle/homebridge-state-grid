@@ -60,18 +60,22 @@
         "maximum": 2160
       },
       "fields": {
-        "title": "卡片指标（显示与顺序）",
+        "title": "卡片指标",
         "type": "array",
-        "description": "按显示顺序列出卡片指标。第 1 项是卡片主数字（账户余额/应交电费），第 2 项与其并列（默认本月预估电费），其余进入下方网格。不想要的指标删除该行即可；上下调整行顺序即改变显示位置。",
+        "description": "按显示顺序列出卡片指标：第 1 项是主数字，第 2 项与其并列，其余进入下方网格。删除某行 = 不显示该指标；拖拽调整顺序 = 改变位置。",
         "default": [
           { "key": "balance" },
           { "key": "monthEstimateCharge" },
           { "key": "currentMonthUsage" },
           { "key": "latestDailyUsage" },
+          { "key": "latestPeakUsage" },
+          { "key": "latestValleyUsage" },
+          { "key": "latestFlatUsage" },
+          { "key": "latestSharpUsage" },
           { "key": "latestMonthUsage" },
+          { "key": "latestMonthCharge" },
           { "key": "currentYearUsage" },
-          { "key": "currentYearCharge" },
-          { "key": "latestMonthCharge" }
+          { "key": "currentYearCharge" }
         ],
         "items": {
           "type": "object",
@@ -85,10 +89,21 @@
                 { "title": "本月预估电费", "enum": ["monthEstimateCharge"] },
                 { "title": "当月用电", "enum": ["currentMonthUsage"] },
                 { "title": "上日用电", "enum": ["latestDailyUsage"] },
+                { "title": "上日峰用电", "enum": ["latestPeakUsage"] },
+                { "title": "上日谷用电", "enum": ["latestValleyUsage"] },
+                { "title": "上日平用电", "enum": ["latestFlatUsage"] },
+                { "title": "上日尖用电", "enum": ["latestSharpUsage"] },
                 { "title": "上月用电", "enum": ["latestMonthUsage"] },
+                { "title": "上月电费", "enum": ["latestMonthCharge"] },
                 { "title": "年累计用电", "enum": ["currentYearUsage"] },
                 { "title": "年累计电费", "enum": ["currentYearCharge"] },
-                { "title": "上月电费", "enum": ["latestMonthCharge"] }
+                { "title": "当月峰用电", "enum": ["monthPeakUsage"] },
+                { "title": "当月谷用电", "enum": ["monthValleyUsage"] },
+                { "title": "当月平用电", "enum": ["monthFlatUsage"] },
+                { "title": "当月尖用电", "enum": ["monthSharpUsage"] },
+                { "title": "当前阶梯", "enum": ["ladderLevel"] },
+                { "title": "违约金", "enum": ["penalty"] },
+                { "title": "历史欠费", "enum": ["historyOwe"] }
               ]
             }
           }
@@ -97,7 +112,7 @@
       "accounts": {
         "title": "户号",
         "type": "array",
-        "description": "留空则自动为账号下所有户号创建卡片。",
+        "description": "留空则自动为账号下所有户号创建卡片。添加一行并填入户号后，可为该户号单独设置标题与是否启用。户号可在插件的「户号与卡片预览」页读取。",
         "items": {
           "type": "object",
           "properties": {
@@ -114,7 +129,8 @@
             "enabled": {
               "title": "启用",
               "type": "boolean",
-              "default": true
+              "default": true,
+              "description": "关闭后该户号不会生成摄像头卡片。"
             }
           }
         }
@@ -130,7 +146,29 @@
     "theme",
     "snapshotWidth",
     "snapshotHeight",
-    "fields",
-    "accounts"
+    {
+      "key": "fields",
+      "type": "tabarray",
+      "title": "指标 {{ value.key }}",
+      "expandable": true,
+      "expanded": false,
+      "orderable": true,
+      "items": [
+        "fields[].key"
+      ]
+    },
+    {
+      "key": "accounts",
+      "type": "tabarray",
+      "title": "{{ value.title || value.consNo || '新户号' }}",
+      "expandable": true,
+      "expanded": false,
+      "orderable": true,
+      "items": [
+        "accounts[].consNo",
+        "accounts[].title",
+        "accounts[].enabled"
+      ]
+    }
   ]
 }

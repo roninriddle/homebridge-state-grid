@@ -300,7 +300,12 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private enabled(account: PowerAccount): boolean {
-    return this.configFor(account)?.enabled !== false;
+    const configured = this.configFor(account);
+    if (configured?.enabled === false) return false;
+    // 设置页「户号与卡片预览」里的启用/停用开关，持久化在 storage。
+    const visibility = this.store.loadVisibility();
+    if (visibility[account.consNoSrc] === false) return false;
+    return true;
   }
 
   private titleFor(account: PowerAccount): string {
@@ -350,6 +355,17 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       latestMonthCharge: entry.snapshot.latestMonthCharge,
       currentYearUsage: entry.snapshot.currentYearUsage,
       currentYearCharge: entry.snapshot.currentYearCharge,
+      latestPeakUsage: entry.snapshot.latestPeakUsage,
+      latestValleyUsage: entry.snapshot.latestValleyUsage,
+      latestFlatUsage: entry.snapshot.latestFlatUsage,
+      latestSharpUsage: entry.snapshot.latestSharpUsage,
+      monthPeakUsage: entry.snapshot.monthPeakUsage,
+      monthValleyUsage: entry.snapshot.monthValleyUsage,
+      monthFlatUsage: entry.snapshot.monthFlatUsage,
+      monthSharpUsage: entry.snapshot.monthSharpUsage,
+      ladderLevel: entry.snapshot.ladderLevel,
+      penalty: entry.snapshot.penalty,
+      historyOwe: entry.snapshot.historyOwe,
       dailySeries: entry.snapshot.dailySeries,
       updatedAt: entry.snapshot.updatedAt,
       fields: this.fields,
@@ -407,6 +423,17 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       latestMonthCharge: snapshot.latestMonthCharge,
       currentYearUsage: snapshot.currentYearUsage,
       currentYearCharge: snapshot.currentYearCharge,
+      latestPeakUsage: snapshot.latestPeakUsage,
+      latestValleyUsage: snapshot.latestValleyUsage,
+      latestFlatUsage: snapshot.latestFlatUsage,
+      latestSharpUsage: snapshot.latestSharpUsage,
+      monthPeakUsage: snapshot.monthPeakUsage,
+      monthValleyUsage: snapshot.monthValleyUsage,
+      monthFlatUsage: snapshot.monthFlatUsage,
+      monthSharpUsage: snapshot.monthSharpUsage,
+      ladderLevel: snapshot.ladderLevel,
+      penalty: snapshot.penalty,
+      historyOwe: snapshot.historyOwe,
       dailySeries: snapshot.dailySeries,
       updatedAt: snapshot.updatedAt,
       fields: this.fields,

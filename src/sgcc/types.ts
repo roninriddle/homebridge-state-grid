@@ -112,6 +112,22 @@ export interface AccountSnapshot {
   /** 后付费应交金额（正数为欠费）。 */
   amountDue?: number;
   latestMonthMeterReading?: number;
+  /** 上日分时用电（峰/谷/平/尖，kWh）。 */
+  latestPeakUsage?: number;
+  latestValleyUsage?: number;
+  latestFlatUsage?: number;
+  latestSharpUsage?: number;
+  /** 当月分时用电（峰/谷/平/尖，kWh）。 */
+  monthPeakUsage?: number;
+  monthValleyUsage?: number;
+  monthFlatUsage?: number;
+  monthSharpUsage?: number;
+  /** 当前阶梯档位（1/2/3）。 */
+  ladderLevel?: number;
+  /** 违约金（元）。 */
+  penalty?: number;
+  /** 历史欠费（元）。 */
+  historyOwe?: number;
   /** 最近 N 天每日用电，按日期升序。 */
   dailySeries: Array<{ date: string; usage: number }>;
   updatedAt: number;

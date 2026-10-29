@@ -63,12 +63,19 @@ export interface DailyReading {
   date: string;
   usage?: number;
   charge?: number;
+  /** 分时电量：峰/谷/平/尖（kWh）。 */
+  peak?: number;
+  valley?: number;
+  flat?: number;
+  sharp?: number;
 }
 
 export interface MonthlyBill {
   month: string;
   usage?: number;
   charge?: number;
+  /** 阶梯档位（levelStdCode，1/2/3）。 */
+  ladderLevel?: number;
 }
 
 export interface BalanceInfo {
@@ -78,6 +85,8 @@ export interface BalanceInfo {
   /** 后付费应交金额，正数表示欠费。 */
   amountDue?: number;
   historyOwe?: number;
+  /** 违约金（元）。 */
+  penalty?: number;
   date: string;
 }
 
@@ -451,6 +460,12 @@ export class StateGridClient {
         date,
         usage: numberOrUndefined(record.dayElePq),
         charge: numberOrUndefined(record.thisAmt),
+        // 分时字段：峰 thisPPq / 谷 thisVPq / 平 thisNPq / 尖 thisTPq。
+        // 最新一天通常是"—"（数据未发布），numberOrUndefined 会转成 undefined。
+        peak: numberOrUndefined(record.thisPPq),
+        valley: numberOrUndefined(record.thisVPq),
+        flat: numberOrUndefined(record.thisNPq),
+        sharp: numberOrUndefined(record.thisTPq),
       });
     }
     return readings.sort((a, b) => a.date.localeCompare(b.date));
@@ -481,6 +496,7 @@ export class StateGridClient {
         charge: numberOrUndefined(
           record.monthAmt ?? record.monthEleCost ?? record.amt ?? record.charge ?? record.sumMoney,
         ),
+        ladderLevel: numberOrUndefined(record.levelStdCode),
       });
     }
     return bills.sort((a, b) => a.month.localeCompare(b.month));
@@ -509,6 +525,7 @@ export class StateGridClient {
       balance: prepaid ? sumMoney : undefined,
       amountDue: prepaid ? undefined : sumMoney,
       historyOwe: numberOrUndefined(record.historyOwe),
+      penalty: numberOrUndefined(record.penalty),
       date: String(record.date ?? ''),
     };
   }
@@ -572,6 +589,9 @@ export class StateGridClient {
       return present.length ? present.reduce((a, b) => a + b, 0) : undefined;
     };
 
+    // 当前阶梯取最新一份结算账单的 levelStdCode（1/2/3 档）。
+    const ladderBill = [...bills].reverse().find((bill) => bill.ladderLevel !== undefined);
+
     return {
       consNo: account.consNoSrc,
       name: account.name || account.consNoSrc,
@@ -584,6 +604,18 @@ export class StateGridClient {
       currentYearCharge: sum(bills.map((bill) => bill.charge)),
       balance: balance?.balance,
       amountDue: balance?.amountDue ?? balance?.historyOwe,
+      // 分时用电：上日取最新日，当月按当月每日累加。
+      latestPeakUsage: latest?.peak,
+      latestValleyUsage: latest?.valley,
+      latestFlatUsage: latest?.flat,
+      latestSharpUsage: latest?.sharp,
+      monthPeakUsage: sum(monthReadings.map((item) => item.peak)),
+      monthValleyUsage: sum(monthReadings.map((item) => item.valley)),
+      monthFlatUsage: sum(monthReadings.map((item) => item.flat)),
+      monthSharpUsage: sum(monthReadings.map((item) => item.sharp)),
+      ladderLevel: ladderBill?.ladderLevel,
+      penalty: balance?.penalty,
+      historyOwe: balance?.historyOwe,
       dailySeries: sorted.map((item) => ({ date: item.date, usage: item.usage as number })),
       updatedAt: Date.now(),
     };

@@ -7,12 +7,12 @@
  * 版式由 `fields` 驱动：
  *  - 第 1 个字段是卡片主数字（大字，账户余额 / 应交电费）；
  *  - 第 2 个字段与主数字并列（大字，默认是本月预估电费）；
- *  - 其余字段进入下方 3 列网格。
+ *  - 其余字段进入下方 4 列网格，行数与字号随字段数量自适应。
  * 缺数据的字段不隐藏，统一显示「—」，保证布局稳定。
  */
 
-import { escapeXml, formatClock, formatMoney, formatUsage } from './format.js';
-import { DEFAULT_FIELD_ORDER, FIELD_META, type FieldKey } from './fields.js';
+import { escapeXml, formatClock, formatMoney, formatNumber, formatUsage } from './format.js';
+import { DEFAULT_FIELD_ORDER, FIELD_META, type FieldKey, type FieldUnit } from './fields.js';
 
 export type CardTheme = 'light' | 'dark';
 
@@ -20,7 +20,7 @@ export interface FieldValue {
   key: FieldKey;
   label: string;
   value?: number;
-  unit: '元' | 'kWh';
+  unit: FieldUnit;
   estimated?: boolean;
 }
 
@@ -38,6 +38,17 @@ export interface CardData {
   latestMonthCharge?: number;
   currentYearUsage?: number;
   currentYearCharge?: number;
+  latestPeakUsage?: number;
+  latestValleyUsage?: number;
+  latestFlatUsage?: number;
+  latestSharpUsage?: number;
+  monthPeakUsage?: number;
+  monthValleyUsage?: number;
+  monthFlatUsage?: number;
+  monthSharpUsage?: number;
+  ladderLevel?: number;
+  penalty?: number;
+  historyOwe?: number;
   dailySeries: Array<{ date: string; usage: number }>;
   updatedAt: number;
   /** 展示哪些字段、按什么顺序。缺省用默认顺序。 */
@@ -129,10 +140,21 @@ function fieldValues(data: CardData): FieldValue[] {
     monthEstimateCharge: data.monthEstimateCharge,
     currentMonthUsage: data.currentMonthUsage,
     latestDailyUsage: data.latestDailyUsage,
+    latestPeakUsage: data.latestPeakUsage,
+    latestValleyUsage: data.latestValleyUsage,
+    latestFlatUsage: data.latestFlatUsage,
+    latestSharpUsage: data.latestSharpUsage,
     latestMonthUsage: data.latestMonthUsage,
+    latestMonthCharge: data.latestMonthCharge,
     currentYearUsage: data.currentYearUsage,
     currentYearCharge: data.currentYearCharge,
-    latestMonthCharge: data.latestMonthCharge,
+    monthPeakUsage: data.monthPeakUsage,
+    monthValleyUsage: data.monthValleyUsage,
+    monthFlatUsage: data.monthFlatUsage,
+    monthSharpUsage: data.monthSharpUsage,
+    ladderLevel: data.ladderLevel,
+    penalty: data.penalty,
+    historyOwe: data.historyOwe,
   };
   return order.map((key) => {
     const meta = FIELD_META[key];
@@ -142,10 +164,16 @@ function fieldValues(data: CardData): FieldValue[] {
 }
 
 function formatFieldValue(field: FieldValue): string {
-  return field.unit === '元' ? formatMoney(field.value) : formatUsage(field.value);
+  if (field.unit === '元') return formatMoney(field.value);
+  if (field.unit === '档') return formatNumber(field.value, 0);
+  return formatUsage(field.value);
 }
 
-/** 主数字 / 并列数字：元带「¥」前缀，kWh 带单位后缀。 */
+function unitSuffix(field: FieldValue): string {
+  return field.unit;
+}
+
+/** 主数字 / 并列数字：元带「¥」前缀，其余带单位后缀。 */
 function heroField(field: FieldValue | undefined, x: number, p: Palette): string {
   if (!field) {
     return text(x, 336, '—', 84, p.secondary, 600);
@@ -158,20 +186,27 @@ function heroField(field: FieldValue | undefined, x: number, p: Palette): string
       text(x, 384, label, 30, p.secondary, 400)
     );
   }
+  const unit = field.unit === '档' ? '档' : 'kWh';
   return (
-    valueWithUnit(x, 336, formatUsage(field.value), 'kWh', 88, p.text, p.secondary) +
+    valueWithUnit(x, 336, formatFieldValue(field), unit, 88, p.text, p.secondary) +
     text(x, 384, label, 30, p.secondary, 400)
   );
 }
 
 /** 网格格：小字标签 + 数值（带单位后缀）。 */
-function tile(field: FieldValue | undefined, x: number, y: number, p: Palette): string {
+function tile(
+  field: FieldValue | undefined,
+  x: number,
+  y: number,
+  valueSize: number,
+  p: Palette,
+): string {
   if (!field) return '';
   const label = field.label + (field.estimated ? ' · 估算' : '');
-  const unit = field.unit === '元' ? '元' : 'kWh';
+  const labelSize = Math.round(valueSize * 0.5);
   return (
-    text(x, y, label, 24, p.secondary, 400) +
-    valueWithUnit(x, y + 58, formatFieldValue(field), unit, 46, p.text, p.secondary)
+    text(x, y, label, labelSize, p.secondary, 400) +
+    valueWithUnit(x, y + valueSize * 1.15, formatFieldValue(field), unitSuffix(field), valueSize, p.text, p.secondary)
   );
 }
 
@@ -202,17 +237,23 @@ export function renderCard(data: CardData): string {
       : '',
   ].join('');
 
-  // 网格：3 列，最多 6 格（8 个字段里前两个已经做成了大字）。
-  const columns = 3;
+  // 网格：4 列，行数与字号随字段数量自适应。
+  const columns = 4;
+  const gridTop = 420;
+  const gridBottom = cardY + cardH - 40;
+  const gridHeight = gridBottom - gridTop;
+  const rows = Math.max(1, Math.ceil(tiles.length / columns));
+  const rowHeight = Math.min(88, gridHeight / rows);
+  const valueSize = rowHeight > 78 ? 46 : rowHeight > 60 ? 38 : 32;
   const columnWidth = innerW / columns;
-  const rowTop = [432, 552];
+
   const tileMarkup = tiles
     .map((field, index) => {
       const col = index % columns;
       const row = Math.floor(index / columns);
       const x = innerX + col * columnWidth;
-      const y = rowTop[row] ?? 0;
-      return tile(field, x, y, p);
+      const y = gridTop + row * rowHeight;
+      return tile(field, x, y, valueSize, p);
     })
     .join('');
 

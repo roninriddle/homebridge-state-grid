@@ -87,6 +87,22 @@ describe('卡片 SVG', () => {
     expect(svg).toContain('应交电费');
     expect(svg).not.toContain('账户余额');
   });
+
+  it('分时与阶梯字段可渲染', () => {
+    const svg = renderCard({
+      ...base,
+      fields: ['balance', 'latestPeakUsage', 'latestValleyUsage', 'ladderLevel', 'penalty'],
+      latestPeakUsage: 6.2,
+      latestValleyUsage: 3.1,
+      ladderLevel: 2,
+      penalty: 0,
+    });
+    expect(svg).toContain('上日峰用电');
+    expect(svg).toContain('上日谷用电');
+    expect(svg).toContain('当前阶梯');
+    expect(svg).toContain('违约金');
+    expect(svg).toContain('档');
+  });
 });
 
 describe('JPEG 输出', () => {

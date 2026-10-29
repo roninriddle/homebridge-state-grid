@@ -227,6 +227,7 @@ class UiGateway {
 
   accountsOf(client) {
     const session = client.currentSession;
+    const visibility = this.store.loadVisibility();
     return client.accounts.map((account) => ({
       consNo: account.consNoSrc,
       consNoMasked: maskConsNo(account.consNoSrc),
@@ -234,7 +235,15 @@ class UiGateway {
       address: account.address || '',
       consType: account.consType || '',
       province: String((session && session.userInfo && session.userInfo.addressProvince) || ''),
+      enabled: visibility[account.consNoSrc] !== false,
     }));
+  }
+
+  /** 设置页切换某户号是否生成卡片。 */
+  setAccountVisibility(consNo, enabled) {
+    if (!consNo) return { ok: false, reason: 'error', message: '缺少户号' };
+    this.store.setAccountVisibility(String(consNo), enabled !== false);
+    return { ok: true };
   }
 
   /**

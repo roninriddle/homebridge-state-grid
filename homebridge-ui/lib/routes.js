@@ -57,6 +57,12 @@ function registerRoutes(server, gateway) {
     safe(async () => gateway.accounts()),
   );
 
+  /** 切换某户号是否生成卡片。 */
+  server.onRequest(
+    '/visibility',
+    safe(async (payload) => gateway.setAccountVisibility(payload.consNo, payload.enabled)),
+  );
+
   /** 单户号数据 + 卡片预览图。 */
   server.onRequest(
     '/preview',
