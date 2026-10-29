@@ -57,6 +57,7 @@ export interface ClientOptions {
   /** 注入 fetch 以便测试。 */
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  onSession?: (session: LoginSession) => void;
 }
 
 export interface DailyReading {
@@ -92,7 +93,7 @@ export interface BalanceInfo {
 
 function numberOrUndefined(value: unknown): number | undefined {
   if (value === null || value === undefined || value === '') return undefined;
-  const parsed = Number(value);
+  const parsed = Number(typeof value === 'string' ? value.trim().replace(/,/g, '') : value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 
@@ -119,6 +120,7 @@ export class StateGridClient {
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private loginInFlight: Promise<LoginSession> | null = null;
+  private readonly onSession?: (session: LoginSession) => void;
 
   constructor(options: ClientOptions) {
     this.profile = options.profile;
@@ -128,6 +130,7 @@ export class StateGridClient {
     this.profileProvider = options.profileProvider;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 30_000;
+    this.onSession = options.onSession;
   }
 
   get currentSession(): LoginSession | null {
@@ -287,13 +290,11 @@ export class StateGridClient {
   }
 
   private raiseForBusinessError(data: Record<string, unknown>, operation: string): void {
-    const server = asRecord(data.srvrt);
-    if (!server) return;
-    const code = String(server.resultCode ?? '');
-    if (code && code !== '0000') {
+    const code = String(data.rtnCode ?? data.returnCode ?? '');
+    if (!['', '0', '1', '0000', '000000'].includes(code)) {
       throw new StateGridApiError(
         code,
-        String(server.resultMessage ?? operation),
+        String(data.rtnMsg ?? data.returnMsg ?? operation),
         'business',
       );
     }
@@ -364,15 +365,17 @@ export class StateGridClient {
     } else {
       userInfo = asRecord(raw) ?? {};
     }
-    const expires = Number(bizrt.expiresIn ?? bizrt.expireIn ?? 0);
-    return {
+    const expires = Number(bizrt.tokenExpireTime ?? bizrt.expiresIn ?? bizrt.expireIn ?? 1296000);
+    const session: LoginSession = {
       token: String(bizrt.token),
-      userId: String(bizrt.userId ?? bizrt.userid ?? ''),
+      userId: String(userInfo.userId ?? bizrt.userId ?? bizrt.userid ?? '0'),
       expiresAt: Number.isFinite(expires) && expires > 0
         ? Date.now() + expires * 1000
-        : Date.now() + 30 * 60 * 1000,
+        : Date.now() + 1296000 * 1000,
       userInfo,
     };
+    this.onSession?.(session);
+    return session;
   }
 
   /** 从短信接口响应里取 codeKey：上游确认它在 data.bizrt.codeKey 里。 */
@@ -417,7 +420,8 @@ export class StateGridClient {
   }
 
   async ensureLogin(): Promise<LoginSession> {
-    if (this.session && this.session.expiresAt > Date.now()) return this.session;
+    if (this.session && (this.session.expiresAt === 0 || this.session.expiresAt > Date.now() + 300_000)) return this.session;
+    if (!this.password) throw new StateGridAuthenticationError('saved_password_required', '登录态已过期，请在设置页重新短信登录');
     return this.login();
   }
 
@@ -430,9 +434,11 @@ export class StateGridClient {
     let response: Record<string, unknown>;
     try {
       response = await this.post(path, payload, { authenticated: true, session });
+      return this.raiseForError(response);
     } catch (error) {
-      if (!(error instanceof StateGridAuthenticationError)) throw error;
-      await this.login();
+      if (!(error instanceof StateGridAuthenticationError) || !AUTH_ERROR_CODES.has(error.code)) throw error;
+      if (this.session === session) this.session = null;
+      await this.ensureLogin();
       response = await this.post(path, payload, { authenticated: true });
     }
     return this.raiseForError(response);
@@ -442,14 +448,14 @@ export class StateGridClient {
     account: PowerAccount,
     startDate: string,
     endDate: string,
-  ): Promise<DailyReading[]> {
+  ): Promise<DailyReading[] & { total?: number }> {
     const data = await this.authenticatedData(
       PATHS.dailyUsage,
       buildDailyUsagePayload(account, startDate, endDate),
     );
     this.raiseForBusinessError(data, '日用电查询');
     const raw = data.sevenEleList;
-    if (!Array.isArray(raw)) return [];
+    if (!Array.isArray(raw)) return Object.assign([], { total: numberOrUndefined(data.totalPq) });
     const readings: DailyReading[] = [];
     for (const item of raw) {
       const record = asRecord(item);
@@ -468,10 +474,10 @@ export class StateGridClient {
         sharp: numberOrUndefined(record.thisTPq),
       });
     }
-    return readings.sort((a, b) => a.date.localeCompare(b.date));
+    return Object.assign(readings.sort((a, b) => a.date.localeCompare(b.date)), { total: numberOrUndefined(data.totalPq) });
   }
 
-  async queryMonthlyBills(account: PowerAccount, year: number): Promise<MonthlyBill[]> {
+  async queryMonthlyBills(account: PowerAccount, year: number): Promise<MonthlyBill[] & { yearUsage?: number; yearCharge?: number }> {
     const data = await this.authenticatedData(
       PATHS.monthlyBills,
       buildMonthlyBillsPayload(account, year),
@@ -488,18 +494,23 @@ export class StateGridClient {
       if (!record) continue;
       const month = String(record.ym ?? record.month ?? '').replace(/^(\d{4})(\d{2})$/, '$1-$2');
       if (!/^\d{4}-\d{2}$/.test(month)) continue;
+      const settlements = Array.isArray(record.eleList) ? record.eleList.map(asRecord).filter(Boolean) : [];
+      const settlementSum = (key: string) => {
+        const values = settlements.map((item) => numberOrUndefined(item?.[key])).filter((value): value is number => value !== undefined);
+        return values.length ? values.reduce((a, b) => a + b, 0) : undefined;
+      };
       bills.push({
         month,
         usage: numberOrUndefined(
           record.monthPq ?? record.monthEleNum ?? record.pq ?? record.elePq ?? record.usage,
-        ),
+        ) ?? settlementSum('pq'),
         charge: numberOrUndefined(
           record.monthAmt ?? record.monthEleCost ?? record.amt ?? record.charge ?? record.sumMoney,
-        ),
+        ) ?? settlementSum('amt'),
         ladderLevel: numberOrUndefined(record.levelStdCode),
       });
     }
-    return bills.sort((a, b) => a.month.localeCompare(b.month));
+    return Object.assign([...new Map(bills.map((bill) => [bill.month, bill])).values()].sort((a, b) => a.month.localeCompare(b.month)), { yearUsage: numberOrUndefined(data.yearPq), yearCharge: numberOrUndefined(data.yearAmt) });
   }
 
   async queryBalance(account: PowerAccount): Promise<BalanceInfo | null> {
@@ -519,10 +530,10 @@ export class StateGridClient {
       numberOrUndefined(record.accountBalance);
     // 有预存余额（prepayBal/accountBalance > 0）视为预付费户号：sumMoney 即剩余可用余额；
     // 否则是后付费户号，sumMoney 是应交电费。
-    const prepaid = (prepay ?? 0) > 0;
+    const prepaid = String(record.consType ?? '') === '1' || (prepay ?? 0) > 0;
     return {
       consType: String(record.consType ?? ''),
-      balance: prepaid ? sumMoney : undefined,
+      balance: prepaid ? (String(record.consType ?? '') === '1' ? sumMoney ?? prepay : prepay) : undefined,
       amountDue: prepaid ? undefined : sumMoney,
       historyOwe: numberOrUndefined(record.historyOwe),
       penalty: numberOrUndefined(record.penalty),
@@ -566,22 +577,33 @@ export class StateGridClient {
    */
   async snapshot(account: PowerAccount, days = 31): Promise<AccountSnapshot> {
     const today = new Date();
-    const start = new Date(today.getTime() - (days - 1) * 86_400_000);
-    const readings = await this.queryDailyUsage(account, formatDate(start), formatDate(today));
-    const balance = await this.queryBalance(account);
+    const todayKey = formatDate(today);
+    const monthKey = todayKey.slice(0, 7);
+    const year = Number(todayKey.slice(0, 4));
+    const readings = await this.queryDailyUsage(account, `${monthKey}-01`, todayKey);
+    if (!readings.some((item) => item.usage !== undefined)) {
+      const end = new Date(`${monthKey}-01T00:00:00+08:00`);
+      const start = new Date(end.getTime() - Math.min(31, Math.max(1, days)) * 86_400_000);
+      readings.unshift(...await this.queryDailyUsage(account, formatDate(start), formatDate(new Date(end.getTime() - 86400000))));
+    }
+    let balance: BalanceInfo | null = null;
+    try { balance = await this.queryBalance(account); } catch (error) {
+      if (!(error instanceof StateGridApiError || error instanceof StateGridNetworkError)) throw error;
+    }
 
     const sorted = readings.filter((item) => item.usage !== undefined);
     const latest = sorted[sorted.length - 1];
-    const monthKey = formatDate(today).slice(0, 7);
     const monthReadings = sorted.filter((item) => item.date.startsWith(monthKey));
 
-    let bills: MonthlyBill[] = [];
+    let bills: MonthlyBill[] & { yearUsage?: number; yearCharge?: number } = [];
+    let previousBills: MonthlyBill[] = [];
     try {
-      bills = await this.queryMonthlyBills(account, today.getFullYear());
+      bills = await this.queryMonthlyBills(account, year);
+      if (!bills.some((bill) => bill.month < monthKey && bill.usage !== undefined)) previousBills = await this.queryMonthlyBills(account, year - 1);
     } catch (error) {
       if (error instanceof StateGridError && !(error instanceof StateGridApiError)) throw error;
     }
-    const settled = bills.filter((bill) => bill.month < monthKey && bill.usage !== undefined);
+    const settled = [...previousBills, ...bills].filter((bill) => bill.month < monthKey && bill.usage !== undefined);
     const lastSettled = settled[settled.length - 1];
 
     const sum = (values: Array<number | undefined>): number | undefined => {
@@ -590,18 +612,21 @@ export class StateGridClient {
     };
 
     // 当前阶梯取最新一份结算账单的 levelStdCode（1/2/3 档）。
-    const ladderBill = [...bills].reverse().find((bill) => bill.ladderLevel !== undefined);
+    const ladderBill = [...previousBills, ...bills].reverse().find((bill) => bill.ladderLevel !== undefined);
 
     return {
       consNo: account.consNoSrc,
       name: account.name || account.consNoSrc,
       latestDailyUsage: latest?.usage,
       latestDailyDate: latest?.date,
-      currentMonthUsage: sum(monthReadings.map((item) => item.usage)),
+      currentMonthUsage: readings.total ?? sum(monthReadings.map((item) => item.usage)),
+      currentMonthThrough: monthReadings[monthReadings.length - 1]?.date,
+      currentMonthPartial: readings.total === undefined && (!monthReadings.length || Number(monthReadings[monthReadings.length - 1].date.slice(-2)) !== monthReadings.length),
+      latestMonth: lastSettled?.month,
       latestMonthUsage: lastSettled?.usage,
       latestMonthCharge: lastSettled?.charge,
-      currentYearUsage: sum(bills.map((bill) => bill.usage)),
-      currentYearCharge: sum(bills.map((bill) => bill.charge)),
+      currentYearUsage: bills.yearUsage ?? sum(bills.map((bill) => bill.usage)),
+      currentYearCharge: bills.yearCharge ?? sum(bills.map((bill) => bill.charge)),
       balance: balance?.balance,
       amountDue: balance?.amountDue ?? balance?.historyOwe,
       // 分时用电：上日取最新日，当月按当月每日累加。

@@ -13,12 +13,26 @@ import { MAX_PAYLOAD, nalType, packetizeNal, splitNalUnits } from '../src/camera
 
 const keys = {
   masterKey: Buffer.from('0123456789abcdef0123456789abcdef', 'hex'),
-  masterSalt: Buffer.from('fedcba9876543210fedcba98', 'hex'),
+  masterSalt: Buffer.from('fedcba9876543210fedcba987654', 'hex'),
 };
 
 describe('SRTP', () => {
   const session = deriveSessionKeys(keys);
 
+  it('符合 RFC 3711 B.3 三项标准向量', () => {
+    const result = deriveSessionKeys({ masterKey: Buffer.from('E1F97A0D3E018BE0D64FA32C06DE4139', 'hex'), masterSalt: Buffer.from('0EC675AD498AFEEBB6960B3AABE6', 'hex') });
+    expect(result.sessionKey.toString('hex')).toBe('c61e7a93744f39ee10734afe3ff7a087');
+    expect(result.sessionSalt.toString('hex')).toBe('30cbbc08863d8c85d49db34a9ae1');
+    expect(result.sessionAuthKey.toString('hex')).toBe('cebe321f6ff7716b6fd4ab49af256a156d38baa4');
+  });
+  it('包序号回绕后使用增长的 ROC', () => {
+    const header = Buffer.from('806300010000000000000001', 'hex'); const payload = Buffer.from('rollover');
+    const first = protectRtp({header, payload}, session, 1, 1);
+    const second = protectRtp({header, payload}, session, 1, 65537);
+    expect(first.equals(second)).toBe(false);
+    expect(unprotectRtp(second, session, 12, 1, 65537).payload).toEqual(payload);
+    expect(() => unprotectRtp(second, session, 12, 1, 1)).toThrow();
+  });
   it('派生出固定长度的会话密钥', () => {
     expect(session.sessionKey.length).toBe(16);
     expect(session.sessionSalt.length).toBe(14);
@@ -30,13 +44,13 @@ describe('SRTP', () => {
     const payload = Buffer.from('hello homekit video payload');
     const packet = protectRtp({ header, payload }, session, 0x12345678, 7);
 
-    // 载荷补齐到 16 字节整数倍（27 → 32），再加 10 字节认证标签。
-    expect(packet.length).toBe(header.length + 32 + 10);
+    // AES-CTR 保持原始载荷长度。
+    expect(packet.length).toBe(header.length + payload.length + 10);
 
     const opened = unprotectRtp(packet, session, header.length, 0x12345678, 7);
     expect(opened.header.equals(header)).toBe(true);
-    // 载荷尾部补了零，比较时只看原始长度。
-    expect(opened.payload.subarray(0, payload.length).equals(payload)).toBe(true);
+    // 接收方必须得到原始载荷。
+    expect(opened.payload.equals(payload)).toBe(true);
   });
 
   it('认证标签被篡改时拒绝接受', () => {

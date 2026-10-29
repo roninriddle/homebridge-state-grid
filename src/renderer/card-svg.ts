@@ -11,7 +11,7 @@
  * 缺数据的字段不隐藏，统一显示「—」，保证布局稳定。
  */
 
-import { escapeXml, formatClock, formatMoney, formatNumber, formatUsage } from './format.js';
+import { escapeXml, formatClock, formatDayMonth, formatMoney, formatNumber, formatUsage } from './format.js';
 import { DEFAULT_FIELD_ORDER, FIELD_META, type FieldKey, type FieldUnit } from './fields.js';
 
 export type CardTheme = 'light' | 'dark';
@@ -26,12 +26,16 @@ export interface FieldValue {
 
 export interface CardData {
   title: string;
+  region?: string;
   /** 主数字：预付费显示余额，后付费显示应交。 */
   primaryValue?: number;
   primaryLabel: string;
   latestDailyUsage?: number;
   latestDailyDate?: string;
   currentMonthUsage?: number;
+  currentMonthThrough?: string;
+  currentMonthPartial?: boolean;
+  latestMonth?: string;
   /** 本月电费估算，基于上月结算均价。 */
   monthEstimateCharge?: number;
   latestMonthUsage?: number;
@@ -158,7 +162,12 @@ function fieldValues(data: CardData): FieldValue[] {
   };
   return order.map((key) => {
     const meta = FIELD_META[key];
-    const label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
+    let label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
+    if (key === 'latestDailyUsage' && data.latestDailyDate) label = `用电 · ${formatDayMonth(data.latestDailyDate)}`;
+    if (key.startsWith('latest') && key.endsWith('Usage') && key !== 'latestMonthUsage' && key !== 'latestDailyUsage' && data.latestDailyDate) label = `${meta.label.replace('上日', '')} · ${formatDayMonth(data.latestDailyDate)}`;
+    if (key === 'currentMonthUsage' && data.currentMonthPartial) label = '当月已取电量 · 部分';
+    if ((key === 'latestMonthUsage' || key === 'latestMonthCharge') && data.latestMonth) label = `${data.latestMonth} ${key === 'latestMonthUsage' ? '用电' : '电费'}`;
+    if (key === 'ladderLevel') label = '最近账单阶梯';
     return { key, label, value: values[key], unit: meta.unit, estimated: meta.estimated };
   });
 }
@@ -261,7 +270,8 @@ export function renderCard(data: CardData): string {
 <rect width="${width}" height="${height}" fill="${p.bg}"/>
 <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="44" fill="${p.card}" stroke="${p.stroke}" stroke-width="1"/>
 <circle cx="${innerX + 10}" cy="110" r="10" fill="${p.accent}"/>
-${text(innerX + 34, 122, data.title, 40, p.text, 600)}
+${text(innerX + 34, 122, data.title, Math.min(40, Math.floor(650 / Math.max(1, Array.from(data.title).length))), p.text, 600)}
+${data.region ? text(innerX + 34, 150, data.region, 20, p.secondary, 400) : ''}
 ${text(rightEdge, 118, statusText, 26, p.secondary, 400, 'end')}
 <line x1="${innerX}" y1="164" x2="${rightEdge}" y2="164" stroke="${p.divider}" stroke-width="1"/>
 ${heroMarkup}

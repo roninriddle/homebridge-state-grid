@@ -40,7 +40,7 @@
         color: var(--text);
         font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
       }
-      .wrap { max-width: 860px; margin: 0 auto; display: grid; gap: 16px; }
+      .wrap { max-width: 1180px; margin: 0 auto; display: grid; gap: 16px; }
       .panel {
         background: var(--panel);
         border: 1px solid var(--line);
@@ -132,6 +132,13 @@
       ol.steps li { margin: 4px 0; }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
 
+      select { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); color: var(--text); font: inherit; }
+      .field-editor { display: grid; grid-template-columns: minmax(200px, .9fr) minmax(280px, 1.1fr); gap: 22px; align-items: start; }
+      .draft-preview { position: sticky; top: 12px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+      .draft-preview h3 { margin: 0 0 4px; font-size: 14px; }
+      .draft-preview img { width: 100%; aspect-ratio: 16/9; display: block; border-radius: 10px; margin-top: 14px; background: var(--bg); }
+      .draft-preview .preview-note { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+      @media (max-width: 640px) { .field-editor { grid-template-columns: 1fr; } .draft-preview { position: static; grid-row: 1; } }
       .field-groups { display: grid; gap: 16px; margin-top: 14px; }
       .field-group h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 500; }
       .field-list { display: flex; flex-direction: column; gap: 8px; }
@@ -158,7 +165,7 @@
       <div id="tab-login">
         <section class="panel">
           <h2>连接状态</h2>
-          <p class="hint">凭据加密保存在 Homebridge 的 storage 目录，只有本机同一用户能解开。</p>
+          <p class="hint">凭据保存在本机，请保护 Homebridge 配置与备份的访问权限。</p>
           <div class="status">
             <span class="dot" id="dot"></span>
             <span id="stateText">正在读取…</span>
@@ -170,8 +177,7 @@
         <section class="panel">
           <h2>账号登录</h2>
           <p class="hint">
-            用「网上国网」App 的手机号登录。国网对「密码登录」有风控（密码过于简单时会返回
-            RK007「网络连接超时」），此时请改用「短信验证码登录」绕过密码校验。
+            用「网上国网」App 的手机号登录。密码登录被拒绝时，可检查 App 中的账号状态，或尝试短信验证码登录；安全校验按服务端提示完成。
           </p>
           <div class="row">
             <div>
@@ -186,7 +192,7 @@
           <div class="actions">
             <button class="primary" id="loginBtn">密码登录</button>
             <button id="smsLoginBtn">短信验证码登录</button>
-            <button class="ghost" id="resetBtn">清除本机登录态</button>
+            <button class="ghost" id="resetBtn">重建设置页连接</button>
           </div>
           <div class="tip hidden" id="loginTip"></div>
 
@@ -240,11 +246,11 @@
             不在列表里 = 不显示。保存后主进程会在几秒内自动重新渲染卡片，无需重启 Homebridge。
           </p>
           <div class="actions" style="margin-top: 0">
-            <button class="primary" id="fieldsSaveBtn">保存</button>
+            <button class="primary" id="fieldsSaveBtn">保存指标</button>
             <button id="fieldsResetBtn">恢复默认</button>
             <span class="meta" id="fieldsMeta"></span>
           </div>
-          <div class="field-groups">
+          <div class="field-editor"><div class="field-groups">
             <div class="field-group">
               <h3>已显示（按顺序）</h3>
               <div id="fieldsActive" class="field-list"></div>
@@ -254,6 +260,19 @@
               <div id="fieldsInactive" class="field-list"></div>
             </div>
           </div>
+          <aside class="draft-preview">
+            <h3>实时预览</h3>
+            <p class="preview-note">调整指标后即时重绘，保存后应用到家庭卡片。</p>
+            <label for="previewAccount">预览户号</label><select id="previewAccount"><option value="">模拟卡片</option></select>
+            <label for="cameraName">摄像头名称（当前户号）</label><input id="cameraName" maxlength="32" placeholder="国家电网" value="国家电网" />
+            <label class="switch"><input type="checkbox" id="showRegion" /><span>显示卡片顶部的省市区</span></label>
+            <button id="appearanceSaveBtn" disabled>保存名称与地区显示</button>
+            <label for="previewTheme">预览主题</label><select id="previewTheme"><option value="">跟随正式设置</option><option value="light">浅色</option><option value="dark">深色</option></select>
+            <img id="draftImage" alt="卡片指标实时预览" />
+            <p class="preview-note" id="draftSource" aria-live="polite">正在读取本地缓存…</p>
+            <p class="preview-note" id="draftState" aria-live="polite">指标尚未修改</p>
+            <p class="preview-note">名称和地区显示按户号保存；指标顺序由“保存指标”应用。预览主题仅用于查看效果。无缓存时明确标注模拟数据。</p>
+          </aside></div>
           <div class="tip hidden" id="fieldsTip"></div>
         </section>
       </div>
@@ -267,6 +286,8 @@
 
       const $ = (id) => document.getElementById(id);
       let currentAccounts = [];
+      let smsKind = 'device';
+      const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;'}[ch]));
 
       function setDot(kind, text) {
         $('dot').className = 'dot ' + (kind || '');
@@ -311,7 +332,8 @@
       }
 
       function accountHtml(a, fromCache) {
-        const name = a.title || a.name || '未命名户号';
+        if (!/^[\w-]{1,128}$/.test(String(a.consNo))) return '';
+        const name = escapeHtml(a.title || a.name || '未命名户号');
         const hasSnapshot = a.snapshot && typeof a.snapshot === 'object';
         const metricsContent = hasSnapshot
           ? metricsHtml(a.snapshot)
@@ -322,8 +344,8 @@
           <div class="acct" data-consno="${a.consNo}">
             <div class="acct-head">
               <span class="acct-name">${name}</span>
-              <span class="acct-sub">${a.consNoMasked}${a.consType ? ' · ' + a.consType : ''}</span>
-              ${a.address ? `<span class="acct-sub">${a.address}</span>` : ''}
+              <span class="acct-sub">${escapeHtml(a.consNoMasked)}${a.consType ? ' · ' + escapeHtml(a.consType) : ''}</span>
+              ${a.address ? `<span class="acct-sub">${escapeHtml(a.address)}</span>` : ''}
               <label class="switch" style="margin-left: auto">
                 <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAccount('${a.consNo}', this.checked)" />
                 <span class="switch-label">${a.enabled ? '已启用' : '已停用'}</span>
@@ -447,9 +469,11 @@
             setDot('err', status.message || '读取失败');
             return;
           }
-          if (status.connected) setDot('ok', '已登录');
-          else if (status.hasSession) setDot('warn', '已有会话，等待主进程刷新');
-          else setDot('', '未登录');
+          if (status.connected) setDot('ok', status.runtimeMessage || '主进程已连接');
+          else if (status.runtimeState === 'needs_verification') setDot('warn', status.runtimeMessage || '需要验证');
+          else if (status.runtimeState === 'error') setDot('err', status.runtimeMessage || '更新失败');
+          else setDot('', status.runtimeMessage || '等待主进程');
+          showTip('statusTip', status.build ? '构建 ' + status.build : '', '');
 
           const bits = [];
           if (status.username) bits.push(status.username);
@@ -457,6 +481,7 @@
           $('metaText').textContent = bits.join(' · ');
 
           if (status.pending && status.pending.kind) {
+            smsKind = status.pending.kind;
             $('smsBox').classList.remove('hidden');
             showTip('smsTip', '已完成一次登录尝试，需要短信验证码才能继续。', 'warn');
           }
@@ -496,6 +521,7 @@
             return;
           }
           if (result.reason === 'need_device_sms') {
+            smsKind = 'device';
             $('smsBox').classList.remove('hidden');
             showTip('loginTip', '国家电网要求新设备短信验证，请先发送验证码。', 'warn');
             return;
@@ -511,7 +537,7 @@
           if (result.reason === 'bad_credentials') {
             showTip(
               'loginTip',
-              '密码登录被国网拒绝（可能是密码过于简单触发 RK007 风控）。请改用「短信验证码登录」。',
+              '密码登录被国网拒绝，请检查账号状态，或改用「短信验证码登录」。',
               'err',
             );
             return;
@@ -529,7 +555,8 @@
             showTip('loginTip', '请先填写 11 位手机号。', 'err');
             return;
           }
-          const result = await bridge.request('/send-sms', { kind: 'login', username });
+          smsKind = 'login';
+          const result = await bridge.request('/send-sms', { kind: smsKind, username });
           if (!result.ok) {
             showTip('loginTip', result.message || '发送验证码失败', 'err');
             return;
@@ -542,7 +569,7 @@
 
       $('sendSmsBtn').addEventListener('click', () =>
         withBusy($('sendSmsBtn'), async () => {
-          const result = await bridge.request('/send-sms', { kind: 'device' });
+          const result = await bridge.request('/send-sms', { kind: smsKind, username: $('username').value.trim() || undefined });
           showTip('smsTip', result.ok ? '验证码已发送，请查收短信。' : result.message || '发送失败', result.ok ? '' : 'err');
         }),
       );
@@ -598,6 +625,64 @@
       let fieldCatalog = [];
       let fieldActive = [];
       let fieldDefaults = [];
+      let fieldsLoaded = false;
+      let fieldSaved = '[]';
+      let draftTimer;
+      let previewSequence = 0;
+      const appearanceDrafts = new Map();
+      const appearanceSaved = new Map();
+      function updateDraftState() {
+        const selected = $('previewAccount').value;
+        const draft = appearanceDrafts.get(selected);
+        const saved = appearanceSaved.get(selected);
+        const appearanceDirty = draft && (!saved || (draft.name.trim() || '国家电网') !== saved.name || draft.showRegion !== saved.showRegion);
+        const dirty = JSON.stringify(fieldActive) !== fieldSaved || appearanceDirty;
+        $('draftState').textContent = dirty ? '草稿未保存 · 正式卡片未改变' : '当前配置已保存';
+      }
+      function editAppearance() {
+        appearanceDrafts.set($('previewAccount').value, {name: $('cameraName').value, showRegion: $('showRegion').checked});
+        scheduleDraft();
+      }
+      $('cameraName').addEventListener('input', editAppearance);
+      $('showRegion').addEventListener('change', editAppearance);
+      $('appearanceSaveBtn').addEventListener('click', () => withBusy($('appearanceSaveBtn'), async () => {
+        const consNo = $('previewAccount').value;
+        const result = await bridge.request('/appearance-save', {consNo, name: $('cameraName').value, showRegion: $('showRegion').checked});
+        if (!result.ok) { showTip('fieldsTip', result.message || '保存失败', 'err'); return; }
+        appearanceSaved.set(consNo, result.appearance); appearanceDrafts.delete(consNo);
+        scheduleDraft(); showTip('fieldsTip', '名称与地区显示已保存，几秒内应用到摄像头。', '');
+      }));
+      function scheduleDraft() {
+        const sequence = ++previewSequence;
+        clearTimeout(draftTimer);
+        draftTimer = setTimeout(() => void loadDraft(sequence), 250);
+        updateDraftState();
+      }
+      async function loadDraft(sequence) {
+        try {
+          const selectedConsNo = $('previewAccount').value;
+          const appearance = appearanceDrafts.get(selectedConsNo);
+          const result = await bridge.request('/preview-draft', {consNo: selectedConsNo || undefined, fields: fieldActive, theme: $('previewTheme').value || undefined, ...appearance});
+          if (sequence !== previewSequence) return;
+          if (!result.ok) { $('draftSource').textContent = result.message || '预览失败'; return; }
+          const selector = $('previewAccount');
+          const selected = selector.value || result.selected;
+          selector.replaceChildren();
+          for (const account of result.accounts || []) {
+            const option = document.createElement('option'); option.value = account.consNo; option.textContent = account.title; selector.appendChild(option);
+          }
+          if (!selector.options.length) { const option = document.createElement('option'); option.value = ''; option.textContent = '模拟卡片'; selector.appendChild(option); }
+          selector.value = selected;
+          appearanceSaved.set(selected, result.savedAppearance);
+          if (result.appearance) { $('cameraName').value = result.appearance.name; $('showRegion').checked = result.appearance.showRegion; }
+          $('appearanceSaveBtn').disabled = !selected;
+          updateDraftState();
+          $('draftImage').src = result.image;
+          $('draftSource').textContent = result.source === 'sample' ? '模拟数据 · 仅供排版预览' : '本地缓存 · 最近成功 ' + new Date(result.updatedAt).toLocaleString('zh-CN', {hour12: false});
+        } catch (error) { if (sequence === previewSequence) $('draftSource').textContent = error.message || '预览失败'; }
+      }
+      $('previewAccount').addEventListener('change', scheduleDraft);
+      $('previewTheme').addEventListener('change', scheduleDraft);
 
       function fieldMetaOf(key) {
         return fieldCatalog.find((f) => f.key === key) || { key, label: key, unit: '' };
@@ -616,12 +701,12 @@
                 <span class="fl-actions">
                   <button onclick="moveField(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
                   <button onclick="moveField(${i}, 1)" ${i === fieldActive.length - 1 ? 'disabled' : ''} title="下移">↓</button>
-                  <button onclick="removeField(${i})" title="移除">移除</button>
+                  <button onclick="removeField(${i})" ${fieldActive.length === 1 ? 'disabled' : ''} title="移除">移除</button>
                 </span>
               </div>`;
               })
               .join('')
-          : '<div class="field-empty">未选择任何指标，卡片将只显示标题。</div>';
+          : '<div class="field-empty">请至少保留一个指标。</div>';
 
         const inactive = fieldCatalog.filter((f) => !activeKeys.has(f.key));
         $('fieldsInactive').innerHTML = inactive.length
@@ -638,6 +723,7 @@
           : '<div class="field-empty">所有指标都已显示。</div>';
 
         $('fieldsMeta').textContent = `已显示 ${fieldActive.length} / ${fieldCatalog.length} 项`;
+        scheduleDraft();
       }
 
       function moveField(i, delta) {
@@ -650,6 +736,7 @@
       }
 
       function removeField(i) {
+        if (fieldActive.length <= 1) { showTip('fieldsTip', '请至少保留一个指标', 'warn'); return; }
         fieldActive.splice(i, 1);
         renderFields();
       }
@@ -660,6 +747,7 @@
       }
 
       async function loadFields() {
+        if (fieldsLoaded) { scheduleDraft(); return; }
         showTip('fieldsTip', '');
         try {
           const r = await bridge.request('/fields');
@@ -670,6 +758,8 @@
           fieldCatalog = r.catalog || [];
           fieldDefaults = r.defaults || [];
           fieldActive = r.active && r.active.length ? [...r.active] : [...fieldDefaults];
+          fieldSaved = JSON.stringify(fieldActive);
+          fieldsLoaded = true;
           renderFields();
         } catch (error) {
           showTip('fieldsTip', error.message || String(error), 'err');
@@ -679,7 +769,10 @@
       $('fieldsSaveBtn').addEventListener('click', () =>
         withBusy($('fieldsSaveBtn'), async () => {
           const result = await bridge.request('/fields-save', { fields: fieldActive });
-          if (result.ok) showTip('fieldsTip', '已保存，主进程将在几秒内自动重新渲染卡片。', '');
+          if (result.ok) {
+            fieldActive = [...result.fields]; fieldSaved = JSON.stringify(fieldActive); renderFields();
+            showTip('fieldsTip', '已保存，主进程将在几秒内自动重新渲染卡片。', '');
+          }
           else showTip('fieldsTip', result.message || '保存失败', 'err');
         }),
       );
@@ -690,6 +783,7 @@
         showTip('fieldsTip', '已恢复默认，点「保存」生效。', 'warn');
       });
 
+      setInterval(() => { if (!$('tab-fields').classList.contains('hidden') && fieldsLoaded) scheduleDraft(); }, 30000);
       void refreshStatus();
     </script>
   </body>

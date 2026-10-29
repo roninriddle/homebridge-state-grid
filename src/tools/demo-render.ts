@@ -13,7 +13,7 @@ import { fallbackCardSvg, renderJpeg } from '../renderer/image-renderer.js';
 const now = Date.now();
 
 const base: CardData = {
-  title: '家庭用电',
+  title: '国家电网',
   primaryValue: 26.91,
   primaryLabel: '账户余额',
   latestDailyUsage: 15.4,
@@ -57,19 +57,20 @@ async function main(): Promise<void> {
   const out = join(process.cwd(), 'preview');
   mkdirSync(out, { recursive: true });
 
-  const outputs: Array<[string, Promise<Buffer>]> = [
-    ['compact-light.jpg', renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 1280 })],
-    ['compact-dark.jpg', renderJpeg(renderCompactCard({ ...base, theme: 'dark' }), { width: 1280 })],
-    ['compact-stale.jpg', renderJpeg(renderCompactCard({ ...stale, theme: 'light' }), { width: 1280 })],
-    ['detail-light.jpg', renderJpeg(renderDetailCard({ ...base, theme: 'light' }), { width: 1920, quality: 90 })],
-    ['detail-dark.jpg', renderJpeg(renderDetailCard({ ...base, theme: 'dark' }), { width: 1920, quality: 90 })],
-    ['custom-fields.jpg', renderJpeg(renderCard({ ...base, theme: 'light', fields: ['balance', 'currentMonthUsage', 'currentYearCharge'] }), { width: 1280 })],
-    ['fallback.jpg', renderJpeg(fallbackCardSvg(1280, 720, '数据获取失败 · 最近成功 10月27日 12:00'), { width: 1280 })],
-    ['compact-thumb.jpg', renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 360 })],
+  const outputs: Array<[string, () => Promise<Buffer>]> = [
+    ['compact-light.jpg', () => renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 1280 })],
+    ['region-visible.jpg', () => renderJpeg(renderCompactCard({ ...base, region: '河北省示例市测试区', theme: 'light' }), { width: 1280 })],
+    ['compact-dark.jpg', () => renderJpeg(renderCompactCard({ ...base, theme: 'dark' }), { width: 1280 })],
+    ['compact-stale.jpg', () => renderJpeg(renderCompactCard({ ...stale, theme: 'light' }), { width: 1280 })],
+    ['detail-light.jpg', () => renderJpeg(renderDetailCard({ ...base, theme: 'light' }), { width: 1920, quality: 90 })],
+    ['detail-dark.jpg', () => renderJpeg(renderDetailCard({ ...base, theme: 'dark' }), { width: 1920, quality: 90 })],
+    ['custom-fields.jpg', () => renderJpeg(renderCard({ ...base, theme: 'light', fields: ['balance', 'currentMonthUsage', 'currentYearCharge'] }), { width: 1280 })],
+    ['fallback.jpg', () => renderJpeg(fallbackCardSvg(1280, 720, '数据获取失败 · 最近成功 10月27日 12:00'), { width: 1280 })],
+    ['compact-thumb.jpg', () => renderJpeg(renderCompactCard({ ...base, theme: 'light' }), { width: 360 })],
   ];
 
   for (const [name, pending] of outputs) {
-    const buffer = await pending;
+    const buffer = await pending();
     writeFileSync(join(out, name), buffer);
     console.log(`${name}  ${(buffer.length / 1024).toFixed(1)} KB`);
   }
