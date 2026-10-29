@@ -232,7 +232,7 @@ class UiGateway {
       connected: runtime?.state === 'ready',
       runtimeState: runtime?.state ?? 'starting',
       runtimeMessage: runtime?.message ?? '等待主进程启动',
-      build: '0.7.1',
+      build: '0.7.2',
     };
   }
 
@@ -264,7 +264,13 @@ class UiGateway {
 
   /** 读缓存里的单户号预览图（纯本地，不联网）。 */
   cachedPreview(consNo) {
-    if (!this.store.loadAccountsCache()?.accounts.some((a) => a.consNo === consNo)) return { ok: false, message: '户号不在缓存中' };
+    const account = this.store.loadAccountsCache()?.accounts.find((a) => a.consNo === consNo);
+    if (!account) return { ok: false, message: '户号不在缓存中' };
+    // 停用户号不会由主进程重绘，预览必须按当前保存设置重绘本地数据，不能沿用旧 JPEG。
+    if (cachedSnapshot(account.data ?? account.snapshot)) {
+      const preview = this.previewDraft({consNo});
+      return {ok: true, image: preview.image, fields: preview.fields};
+    }
     const jpeg = this.store.loadCachedPreview(String(consNo));
     if (!jpeg) return { ok: false, reason: 'error', message: '暂无缓存预览' };
     return { ok: true, image: `data:image/jpeg;base64,${jpeg.toString('base64')}` };

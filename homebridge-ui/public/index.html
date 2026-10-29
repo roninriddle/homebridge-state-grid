@@ -268,7 +268,7 @@
           <h2>卡片指标</h2>
           <p class="hint">
             勾选并排序卡片上要显示的指标：第 1 项是主数字，第 2 项与之并列，其余自动调整列数与字号。顶部两项始终最大。
-            不在列表里 = 不显示。保存后主进程会在几秒内自动重新渲染卡片，无需重启 Homebridge。
+            不在列表里 = 不显示。请点击本页“保存指标”应用更改，无需再点窗口底部的“保存”，也无需重启 Homebridge。
           </p>
           <div class="actions field-toolbar" style="margin-top: 0">
             <button class="primary" id="fieldsSaveBtn">保存指标</button>
@@ -460,6 +460,8 @@
           else {
             const account = currentAccounts.find((a) => a.consNo === consNo);
             if (account) account.enabled = enabled;
+            const label = document.querySelector(`[data-consno="${consNo}"] .switch-label`);
+            if (label) label.textContent = enabled ? '已启用' : '已停用';
           }
         } catch (error) {
           showTip('accountsTip', error.message || String(error), 'err');
@@ -679,7 +681,14 @@
         const saved = appearanceSaved.get(selected);
         const appearanceDirty = draft && (!saved || (draft.name.trim() || '国家电网') !== saved.name || draft.showRegion !== saved.showRegion);
         const dirty = JSON.stringify(fieldActive) !== fieldSaved || appearanceDirty;
-        $('draftState').textContent = dirty ? '草稿未保存 · 正式卡片未改变' : '当前配置已保存';
+        $('draftState').textContent = dirty ? '草稿未保存 · 请点击对应保存按钮' : '当前配置已保存';
+        const otherAppearanceDirty = [...appearanceDrafts].some(([key, value]) => {
+          const stored = appearanceSaved.get(key);
+          return !stored || (value.name.trim() || '国家电网') !== stored.name || value.showRegion !== stored.showRegion;
+        });
+        // Homebridge 的通用“保存”不提交本页草稿，禁止让它关窗并丢弃未保存编辑。
+        if (dirty || otherAppearanceDirty) bridge.disableSaveButton?.();
+        else bridge.enableSaveButton?.();
       }
       function editAppearance() {
         appearanceDrafts.set($('previewAccount').value, {name: $('cameraName').value, showRegion: $('showRegion').checked});
@@ -816,19 +825,25 @@
 
       $('fieldsSaveBtn').addEventListener('click', () =>
         withBusy($('fieldsSaveBtn'), async () => {
-          const result = await bridge.request('/fields-save', { fields: fieldActive });
-          if (result.ok) {
-            fieldActive = [...result.fields]; fieldSaved = JSON.stringify(fieldActive); renderFields();
-            showTip('fieldsTip', '已保存，主进程将在几秒内自动重新渲染卡片。', '');
+          try {
+            const savingFields = [...fieldActive];
+            const result = await bridge.request('/fields-save', { fields: savingFields });
+            if (result.ok) {
+              if (JSON.stringify(fieldActive) === JSON.stringify(savingFields)) fieldActive = [...result.fields];
+              fieldSaved = JSON.stringify(result.fields); renderFields();
+              showTip('fieldsTip', JSON.stringify(fieldActive) === fieldSaved ? '指标已保存；主画面几秒内更新，无需再点底部保存或重启。' : '提交的指标已保存；后续编辑仍为草稿，请再次保存。', '');
+            }
+            else showTip('fieldsTip', result.message || '保存失败', 'err');
+          } catch (error) {
+            showTip('fieldsTip', error.message || '保存指标失败，请重试', 'err');
           }
-          else showTip('fieldsTip', result.message || '保存失败', 'err');
         }),
       );
 
       $('fieldsResetBtn').addEventListener('click', () => {
         fieldActive = [...fieldDefaults];
         renderFields();
-        showTip('fieldsTip', '已恢复默认，点「保存」生效。', 'warn');
+        showTip('fieldsTip', '已恢复默认，点“保存指标”生效。', 'warn');
       });
 
       setInterval(() => { if (!$('tab-fields').classList.contains('hidden') && fieldsLoaded) scheduleDraft(); }, 30000);
