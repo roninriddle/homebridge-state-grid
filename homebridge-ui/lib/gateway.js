@@ -34,6 +34,12 @@ const { StateGridClient } = loadDist('sgcc/client.js');
 const { renderCompactCard } = loadDist('renderer/card-svg.js');
 const { renderJpeg } = loadDist('renderer/image-renderer.js');
 const {
+  FIELD_KEYS,
+  FIELD_META,
+  DEFAULT_FIELD_ORDER,
+  normalizeFieldOrder,
+} = loadDist('renderer/fields.js');
+const {
   estimateCharge,
   summarizeSnapshot,
   maskConsNo,
@@ -316,6 +322,38 @@ class UiGateway {
   }
 
   /**
+   * 读取卡片指标配置：当前生效的字段顺序 + 完整字段目录。
+   * 目录含 label/unit/estimated，供设置页渲染勾选列表（单一数据源，避免前后端漂移）。
+   */
+  fields() {
+    const stored = this.store.loadFields();
+    return {
+      ok: true,
+      active: stored && stored.length ? normalizeFieldOrder(stored) : null,
+      catalog: FIELD_KEYS.map((key) => ({
+        key,
+        label: FIELD_META[key].label,
+        unit: FIELD_META[key].unit,
+        estimated: Boolean(FIELD_META[key].estimated),
+      })),
+      defaults: [...DEFAULT_FIELD_ORDER],
+    };
+  }
+
+  /** 保存卡片指标配置（字段顺序 = 显示顺序，不在列表里 = 不显示）。 */
+  setFields(fields) {
+    const valid = normalizeFieldOrder(fields);
+    this.store.saveFields(valid);
+    return { ok: true, fields: valid };
+  }
+
+  /** 当前生效的字段顺序（设置页预览与主进程保持一致）。 */
+  currentFields() {
+    const stored = this.store.loadFields();
+    return stored && stored.length ? normalizeFieldOrder(stored) : undefined;
+  }
+
+  /**
    * 单个户号的完整数据 + 卡片预览。
    *
    * 预览图按 640 宽渲染：设置页里只是让人确认"卡片长得对不对"，
@@ -329,7 +367,7 @@ class UiGateway {
       const snapshot = await client.snapshot(account);
       const theme = (options && options.theme) === 'dark' ? 'dark' : 'light';
       const card = {
-        title: (options && options.title) || account.name || `用电 ${consNo.slice(-4)}`,
+        title: (options && options.title) || this.titleOf(account),
         primaryValue: snapshot.balance !== undefined ? snapshot.balance : snapshot.amountDue,
         primaryLabel: snapshot.balance !== undefined ? '账户余额' : '应交电费',
         latestDailyUsage: snapshot.latestDailyUsage,
@@ -340,8 +378,20 @@ class UiGateway {
         latestMonthCharge: snapshot.latestMonthCharge,
         currentYearUsage: snapshot.currentYearUsage,
         currentYearCharge: snapshot.currentYearCharge,
+        latestPeakUsage: snapshot.latestPeakUsage,
+        latestValleyUsage: snapshot.latestValleyUsage,
+        latestFlatUsage: snapshot.latestFlatUsage,
+        latestSharpUsage: snapshot.latestSharpUsage,
+        monthPeakUsage: snapshot.monthPeakUsage,
+        monthValleyUsage: snapshot.monthValleyUsage,
+        monthFlatUsage: snapshot.monthFlatUsage,
+        monthSharpUsage: snapshot.monthSharpUsage,
+        ladderLevel: snapshot.ladderLevel,
+        penalty: snapshot.penalty,
+        historyOwe: snapshot.historyOwe,
         dailySeries: snapshot.dailySeries,
         updatedAt: snapshot.updatedAt,
+        fields: this.currentFields(),
         theme,
       };
       const jpeg = await renderJpeg(renderCompactCard(card), { width: 640, quality: 80 });

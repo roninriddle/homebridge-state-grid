@@ -75,6 +75,18 @@ function registerRoutes(server, gateway) {
     safe(async (payload) => gateway.setAccountVisibility(payload.consNo, payload.enabled)),
   );
 
+  /** 读卡片指标配置（当前顺序 + 完整字段目录）。 */
+  server.onRequest(
+    '/fields',
+    safe(async () => gateway.fields()),
+  );
+
+  /** 保存卡片指标配置。 */
+  server.onRequest(
+    '/fields-save',
+    safe(async (payload) => gateway.setFields(payload.fields)),
+  );
+
   /** 单户号数据 + 卡片预览图。 */
   server.onRequest(
     '/preview',

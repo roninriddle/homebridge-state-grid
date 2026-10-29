@@ -147,17 +147,6 @@
     "snapshotWidth",
     "snapshotHeight",
     {
-      "key": "fields",
-      "type": "tabarray",
-      "title": "指标 {{ value.key }}",
-      "expandable": true,
-      "expanded": false,
-      "orderable": true,
-      "items": [
-        "fields[].key"
-      ]
-    },
-    {
       "key": "accounts",
       "type": "tabarray",
       "title": "{{ value.title || value.consNo || '新户号' }}",

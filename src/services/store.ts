@@ -277,4 +277,39 @@ export class PluginStore {
     map[consNo] = enabled;
     writeJson(join(this.dir, 'visibility.json'), map);
   }
+
+  /** 卡片指标顺序（fields.json）。不存在或结构非法时返回 null，由调用方归一化。 */
+  loadFields(): string[] | null {
+    const value = readJson<string[]>(join(this.dir, 'fields.json'));
+    return Array.isArray(value) ? value : null;
+  }
+
+  saveFields(fields: string[]): void {
+    writeJson(join(this.dir, 'fields.json'), fields);
+  }
+
+  /**
+   * 读 fields.json 的原始文本，供主进程轮询比对变化。
+   * 设置页跑在独立进程里，写文件后主进程只能靠比对内容感知变化。
+   */
+  readFieldsRaw(): string {
+    const file = join(this.dir, 'fields.json');
+    if (!existsSync(file)) return '';
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return '';
+    }
+  }
+
+  /** 读 visibility.json 的原始文本，同上，用于轮询感知户号开关变化。 */
+  readVisibilityRaw(): string {
+    const file = join(this.dir, 'visibility.json');
+    if (!existsSync(file)) return '';
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      return '';
+    }
+  }
 }

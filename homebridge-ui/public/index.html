@@ -131,6 +131,19 @@
       ol.steps { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 12.5px; }
       ol.steps li { margin: 4px 0; }
       code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+
+      .field-groups { display: grid; gap: 16px; margin-top: 14px; }
+      .field-group h3 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 500; }
+      .field-list { display: flex; flex-direction: column; gap: 8px; }
+      .field-row {
+        display: flex; align-items: center; gap: 10px;
+        padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px;
+      }
+      .field-row .fl-label { font-weight: 500; }
+      .field-row .fl-unit { color: var(--muted); font-size: 12px; }
+      .field-row .fl-actions { margin-left: auto; display: flex; gap: 6px; }
+      .field-row .fl-actions button { padding: 4px 10px; font-size: 12.5px; }
+      .field-empty { color: var(--muted); font-size: 12.5px; padding: 8px 2px; }
     </style>
   </head>
   <body>
@@ -138,6 +151,7 @@
       <nav class="tabs">
         <button class="tab active" id="tabBtnLogin" onclick="switchTab('login')">连接与登录</button>
         <button class="tab" id="tabBtnAccounts" onclick="switchTab('accounts')">户号与卡片预览</button>
+        <button class="tab" id="tabBtnFields" onclick="switchTab('fields')">卡片指标</button>
       </nav>
 
       <!-- Tab 1：连接与登录 -->
@@ -214,6 +228,33 @@
           </div>
           <div id="accounts" style="margin-top: 6px"></div>
           <div class="tip hidden" id="accountsTip"></div>
+        </section>
+      </div>
+
+      <!-- Tab 3：卡片指标 -->
+      <div id="tab-fields" class="hidden">
+        <section class="panel">
+          <h2>卡片指标</h2>
+          <p class="hint">
+            勾选并排序卡片上要显示的指标：第 1 项是主数字，第 2 项与之并列，其余进入下方网格。
+            不在列表里 = 不显示。保存后主进程会在几秒内自动重新渲染卡片，无需重启 Homebridge。
+          </p>
+          <div class="actions" style="margin-top: 0">
+            <button class="primary" id="fieldsSaveBtn">保存</button>
+            <button id="fieldsResetBtn">恢复默认</button>
+            <span class="meta" id="fieldsMeta"></span>
+          </div>
+          <div class="field-groups">
+            <div class="field-group">
+              <h3>已显示（按顺序）</h3>
+              <div id="fieldsActive" class="field-list"></div>
+            </div>
+            <div class="field-group">
+              <h3>未显示</h3>
+              <div id="fieldsInactive" class="field-list"></div>
+            </div>
+          </div>
+          <div class="tip hidden" id="fieldsTip"></div>
         </section>
       </div>
     </div>
@@ -426,11 +467,16 @@
 
       function switchTab(tab) {
         const isLogin = tab === 'login';
+        const isAccounts = tab === 'accounts';
+        const isFields = tab === 'fields';
         $('tab-login').classList.toggle('hidden', !isLogin);
-        $('tab-accounts').classList.toggle('hidden', isLogin);
+        $('tab-accounts').classList.toggle('hidden', !isAccounts);
+        $('tab-fields').classList.toggle('hidden', !isFields);
         $('tabBtnLogin').classList.toggle('active', isLogin);
-        $('tabBtnAccounts').classList.toggle('active', !isLogin);
-        if (!isLogin) void loadCachedAccounts();
+        $('tabBtnAccounts').classList.toggle('active', isAccounts);
+        $('tabBtnFields').classList.toggle('active', isFields);
+        if (isAccounts) void loadCachedAccounts();
+        if (isFields) void loadFields();
       }
 
       $('loginBtn').addEventListener('click', () =>
@@ -547,6 +593,102 @@
           await refreshStatus();
         }),
       );
+
+      // ---------------- 卡片指标（Tab 3） ----------------
+      let fieldCatalog = [];
+      let fieldActive = [];
+      let fieldDefaults = [];
+
+      function fieldMetaOf(key) {
+        return fieldCatalog.find((f) => f.key === key) || { key, label: key, unit: '' };
+      }
+
+      function renderFields() {
+        const activeKeys = new Set(fieldActive);
+        $('fieldsActive').innerHTML = fieldActive.length
+          ? fieldActive
+              .map((key, i) => {
+                const f = fieldMetaOf(key);
+                return `
+              <div class="field-row">
+                <span class="fl-label">${f.label}</span>
+                <span class="fl-unit">${f.unit || ''}</span>
+                <span class="fl-actions">
+                  <button onclick="moveField(${i}, -1)" ${i === 0 ? 'disabled' : ''} title="上移">↑</button>
+                  <button onclick="moveField(${i}, 1)" ${i === fieldActive.length - 1 ? 'disabled' : ''} title="下移">↓</button>
+                  <button onclick="removeField(${i})" title="移除">移除</button>
+                </span>
+              </div>`;
+              })
+              .join('')
+          : '<div class="field-empty">未选择任何指标，卡片将只显示标题。</div>';
+
+        const inactive = fieldCatalog.filter((f) => !activeKeys.has(f.key));
+        $('fieldsInactive').innerHTML = inactive.length
+          ? inactive
+              .map(
+                (f) => `
+              <div class="field-row">
+                <span class="fl-label">${f.label}</span>
+                <span class="fl-unit">${f.unit || ''}</span>
+                <span class="fl-actions"><button onclick="addField('${f.key}')">添加</button></span>
+              </div>`,
+              )
+              .join('')
+          : '<div class="field-empty">所有指标都已显示。</div>';
+
+        $('fieldsMeta').textContent = `已显示 ${fieldActive.length} / ${fieldCatalog.length} 项`;
+      }
+
+      function moveField(i, delta) {
+        const j = i + delta;
+        if (j < 0 || j >= fieldActive.length) return;
+        const tmp = fieldActive[i];
+        fieldActive[i] = fieldActive[j];
+        fieldActive[j] = tmp;
+        renderFields();
+      }
+
+      function removeField(i) {
+        fieldActive.splice(i, 1);
+        renderFields();
+      }
+
+      function addField(key) {
+        if (!fieldActive.includes(key)) fieldActive.push(key);
+        renderFields();
+      }
+
+      async function loadFields() {
+        showTip('fieldsTip', '');
+        try {
+          const r = await bridge.request('/fields');
+          if (!r.ok) {
+            showTip('fieldsTip', r.message || '读取失败', 'err');
+            return;
+          }
+          fieldCatalog = r.catalog || [];
+          fieldDefaults = r.defaults || [];
+          fieldActive = r.active && r.active.length ? [...r.active] : [...fieldDefaults];
+          renderFields();
+        } catch (error) {
+          showTip('fieldsTip', error.message || String(error), 'err');
+        }
+      }
+
+      $('fieldsSaveBtn').addEventListener('click', () =>
+        withBusy($('fieldsSaveBtn'), async () => {
+          const result = await bridge.request('/fields-save', { fields: fieldActive });
+          if (result.ok) showTip('fieldsTip', '已保存，主进程将在几秒内自动重新渲染卡片。', '');
+          else showTip('fieldsTip', result.message || '保存失败', 'err');
+        }),
+      );
+
+      $('fieldsResetBtn').addEventListener('click', () => {
+        fieldActive = [...fieldDefaults];
+        renderFields();
+        showTip('fieldsTip', '已恢复默认，点「保存」生效。', 'warn');
+      });
 
       void refreshStatus();
     </script>

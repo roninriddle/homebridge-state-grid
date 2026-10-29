@@ -96,6 +96,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private refreshTimer: NodeJS.Timeout | null = null;
   /** 卡在"需要验证码"时，轮询磁盘 session 是否已被设置页更新。 */
   private verifyPollTimer: NodeJS.Timeout | null = null;
+  /** 监听设置页写入的字段顺序/户号开关，实时同步 HomeKit。 */
+  private configWatcher: NodeJS.Timeout | null = null;
+  private lastFieldsRaw = '';
+  private lastVisibilityRaw = '';
   /** 需要人工处理的状态（短信验证 / 风控挑战），供 UI 读取。 */
   private readonly status: {
     state: 'starting' | 'ready' | 'needs_verification' | 'error';
@@ -147,6 +151,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private get fields(): FieldKey[] {
+    // 设置页「卡片指标」里的配置写在 storage/fields.json（主进程与设置页共享），
+    // 优先读它；没配置过再回退到 config.json 的 fields。
+    const stored = this.store.loadFields();
+    if (stored && stored.length) return normalizeFieldOrder(stored);
     return normalizeFieldOrder(this.config.fields);
   }
 
@@ -156,6 +164,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private async bootstrap(): Promise<void> {
+    this.startConfigWatcher();
     try {
       await this.connect();
       await this.refreshAll();
@@ -251,6 +260,97 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     this.verifyPollTimer = null;
   }
 
+  /**
+   * 监听设置页写入的配置变化（字段顺序、户号开关），实时同步 HomeKit。
+   *
+   * 为什么需要：设置页跑在独立进程里，它改「卡片指标」「户号开关」后直接落盘；
+   * 本进程若不主动去看，停用的户号会一直挂在 HomeKit 上、改动的指标也不会
+   * 立即生效。这里每 8 秒比对一次文件内容，变了就立即处理。
+   */
+  private startConfigWatcher(): void {
+    if (this.configWatcher) return;
+    // 初始化基线，避免启动时把「首次读到的内容」误判成变化。
+    this.lastFieldsRaw = this.store.readFieldsRaw();
+    this.lastVisibilityRaw = this.store.readVisibilityRaw();
+    this.configWatcher = setInterval(() => {
+      this.reconcileFields();
+      void this.reconcileVisibility();
+    }, 8_000);
+    this.configWatcher.unref?.();
+  }
+
+  /** 字段顺序变了就立即重绘所有已拿到数据的卡片，无需重启。 */
+  private reconcileFields(): void {
+    const raw = this.store.readFieldsRaw();
+    if (raw === this.lastFieldsRaw) return;
+    this.lastFieldsRaw = raw;
+    this.log.info('检测到卡片指标配置变化，重新渲染卡片…');
+    for (const entry of this.entries.values()) {
+      if (entry.snapshot) void this.paint(entry);
+    }
+  }
+
+  /** 户号开关变了就同步配件：停用的移除、启用的补上，再拉一遍数据。 */
+  private async reconcileVisibility(): Promise<void> {
+    const raw = this.store.readVisibilityRaw();
+    if (raw === this.lastVisibilityRaw) return;
+    this.lastVisibilityRaw = raw;
+    if (!this.client?.currentSession) return;
+    this.log.info('检测到户号开关变化，同步 HomeKit 配件…');
+    await this.refreshAll();
+  }
+
+  /** 让 HomeKit 里挂着的配件与「启用」状态对齐。 */
+  private reconcileAccessories(): void {
+    const accounts = this.accounts();
+    const enabledSet = new Set(
+      accounts.filter((account) => this.enabled(account)).map((account) => account.consNoSrc),
+    );
+    // 移除已停用的配件（可能在 entries 里）。
+    for (const [consNo, entry] of [...this.entries.entries()]) {
+      if (!enabledSet.has(consNo)) this.removeEntry(consNo, entry);
+    }
+    // 重启后 configureAccessory 把 Homebridge 缓存里的配件先塞进了 pendingAccessories，
+    // 已停用的户号还没进 entries，也要在这里一并从 HomeKit 移除。
+    // 反查方式：优先用 context.consNo（本次运行写入），旧版本没写 context 就用 UUID 兜底
+    // （UUID 由 consNo 确定性生成，能跨版本还原）。
+    const disabledUuids = new Map(
+      accounts
+        .filter((account) => !this.enabled(account))
+        .map((account) => [
+          this.api.hap.uuid.generate(`${PLUGIN_NAME}:${account.consNoSrc}`),
+          account.consNoSrc,
+        ]),
+    );
+    for (let i = this.pendingAccessories.length - 1; i >= 0; i--) {
+      const accessory = this.pendingAccessories[i];
+      const contextConsNo = (accessory.context && accessory.context.consNo) || '';
+      const byUuid = disabledUuids.get(accessory.UUID) || '';
+      const consNo = contextConsNo || byUuid;
+      if (consNo && !enabledSet.has(String(consNo))) {
+        this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+        this.pendingAccessories.splice(i, 1);
+        this.log.info(`已从 HomeKit 移除配件：${accessory.displayName}`);
+      }
+    }
+    // 启用但还没进 entries 的，注册并挂上摄像头控制器。
+    for (const account of accounts) {
+      if (enabledSet.has(account.consNoSrc)) this.ensureEntry(account);
+    }
+  }
+
+  /** 从 HomeKit 移除一个配件。 */
+  private removeEntry(consNo: string, entry: CameraEntry): void {
+    try {
+      entry.camera.stopStream();
+    } catch {
+      /* 忽略停止流的异常 */
+    }
+    this.api.unregisterPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [entry.accessory]);
+    this.entries.delete(consNo);
+    this.log.info(`已从 HomeKit 移除配件：${entry.title}`);
+  }
+
   /** 组装设备档案并建立会话。 */
   private async connect(): Promise<void> {
     const username = this.config.username || this.store.loadAccount()?.username || '';
@@ -329,10 +429,12 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
   private async refreshAll(): Promise<void> {
     if (!this.client) return;
+    // 每次刷新前先对齐配件：停用的户号从 HomeKit 移除、启用的补上。
+    this.reconcileAccessories();
     const accounts = this.accounts().filter((account) => this.enabled(account));
 
     for (const account of accounts) {
-      const entry = this.ensureEntry(account);
+      const entry = this.entries.get(account.consNoSrc) ?? this.ensureEntry(account);
       try {
         const snapshot = await this.client.snapshot(account);
         entry.snapshot = snapshot;
@@ -496,11 +598,14 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     const uuid = this.api.hap.uuid.generate(`${PLUGIN_NAME}:${account.consNoSrc}`);
     const title = this.titleFor(account);
     const cached = this.pendingAccessories.find((item) => item.UUID === uuid);
+    if (cached) this.pendingAccessories.splice(this.pendingAccessories.indexOf(cached), 1);
 
     const accessory =
       cached ?? new this.api.platformAccessory(title, uuid, this.api.hap.Categories.CAMERA);
 
     accessory.displayName = title;
+    // 把户号写进 context，重启后 configureAccessory 能据此反查，停用的户号才能被移除。
+    accessory.context.consNo = account.consNoSrc;
 
     const entry: CameraEntry = {
       accessory,
@@ -665,7 +770,9 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private scheduleRefresh(): void {
-    this.stop();
+    // 只重置数据刷新定时器，绝不动 configWatcher（否则监听器会被误清）。
+    if (this.refreshTimer) clearInterval(this.refreshTimer);
+    this.refreshTimer = null;
     const intervalMs = this.intervalHours * 3600 * 1000;
     this.refreshTimer = setInterval(() => {
       void this.refreshAll().catch((error) => this.setError(error));
@@ -676,6 +783,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private stop(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     this.refreshTimer = null;
+    if (this.configWatcher) clearInterval(this.configWatcher);
+    this.configWatcher = null;
     for (const entry of this.entries.values()) entry.camera.stopStream();
   }
 
