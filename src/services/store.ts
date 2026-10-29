@@ -16,6 +16,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync, renameSy
 import { hostname, userInfo } from 'node:os';
 import { join } from 'node:path';
 
+import type { AccountAppearance } from './appearance.js';
 import type { LoginSession, AccountSnapshot } from '../sgcc/types.js';
 import {
   createProfileState,
@@ -297,6 +298,25 @@ export class PluginStore {
 
   loadRuntimeStatus(): Record<string, unknown> | null {
     return readJson(join(this.cacheDir(), 'status.json'));
+  }
+
+  loadAppearance(): Record<string, AccountAppearance> {
+    return readJson<Record<string, AccountAppearance>>(join(this.dir, 'appearance.json')) ?? {};
+  }
+
+  saveAppearance(consNo: string, value: AccountAppearance): AccountAppearance {
+    this.validateConsNo(consNo);
+    if (typeof value.name !== 'string' || typeof value.showRegion !== 'boolean') throw new Error('名称和地区显示设置无效');
+    const name = value.name.trim();
+    if ((name && Array.from(name).length < 2) || Array.from(name).length > 32 || /[\x00-\x1f]/.test(name)) throw new Error('摄像头名称请填写 2～32 个字符，留空恢复国家电网');
+    const appearance = { name, showRegion: value.showRegion };
+    const values = this.loadAppearance(); values[consNo] = appearance;
+    writeJson(join(this.dir, 'appearance.json'), values);
+    return appearance;
+  }
+
+  readAppearanceRaw(): string {
+    try { return readFileSync(join(this.dir, 'appearance.json'), 'utf8'); } catch { return ''; }
   }
 
   /** 户号显示开关（设置页「户号与卡片预览」里的启用/停用）。 */

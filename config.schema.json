@@ -35,6 +35,12 @@
         "maximum": 24,
         "description": "国家电网的日用电数据本身是延迟发布的，查询过于频繁没有意义，也更容易触发风控。"
       },
+      "showRegion": {
+        "title": "显示卡片顶部的省市区",
+        "type": "boolean",
+        "default": false,
+        "description": "默认隐藏地区；也可在卡片指标页按户号单独设置。"
+      },
       "theme": {
         "title": "卡片主题",
         "type": "string",
@@ -124,7 +130,12 @@
             "title": {
               "title": "显示名称",
               "type": "string",
-              "description": "例如「家庭用电」「父母家」。会作为摄像头名称出现在家庭 App。"
+              "description": "摄像头显示名称，默认“国家电网”。多个户号可以分别命名，不使用户号或地区作为默认名称。"
+            },
+            "showRegion": {
+              "title": "显示省市区",
+              "type": "boolean",
+              "description": "不设置则继承全局设置；卡片指标页按户号保存的设置优先。"
             },
             "enabled": {
               "title": "启用",
@@ -144,6 +155,7 @@
     "password",
     "updateIntervalHours",
     "theme",
+    "showRegion",
     "snapshotWidth",
     "snapshotHeight",
     {
@@ -156,6 +168,7 @@
       "items": [
         "accounts[].consNo",
         "accounts[].title",
+        "accounts[].showRegion",
         "accounts[].enabled"
       ]
     }

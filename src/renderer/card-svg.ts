@@ -26,6 +26,7 @@ export interface FieldValue {
 
 export interface CardData {
   title: string;
+  region?: string;
   /** 主数字：预付费显示余额，后付费显示应交。 */
   primaryValue?: number;
   primaryLabel: string;
@@ -269,7 +270,8 @@ export function renderCard(data: CardData): string {
 <rect width="${width}" height="${height}" fill="${p.bg}"/>
 <rect x="${cardX}" y="${cardY}" width="${cardW}" height="${cardH}" rx="44" fill="${p.card}" stroke="${p.stroke}" stroke-width="1"/>
 <circle cx="${innerX + 10}" cy="110" r="10" fill="${p.accent}"/>
-${text(innerX + 34, 122, data.title, 40, p.text, 600)}
+${text(innerX + 34, 122, data.title, Math.min(40, Math.floor(650 / Math.max(1, Array.from(data.title).length))), p.text, 600)}
+${data.region ? text(innerX + 34, 150, data.region, 20, p.secondary, 400) : ''}
 ${text(rightEdge, 118, statusText, 26, p.secondary, 400, 'end')}
 <line x1="${innerX}" y1="164" x2="${rightEdge}" y2="164" stroke="${p.divider}" stroke-width="1"/>
 ${heroMarkup}

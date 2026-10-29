@@ -8,6 +8,8 @@ import { StateGridClient } from '../src/sgcc/client.js';
 import { StateGridAuthenticationError, StateGridDeviceVerificationRequired, type DeviceProfile, type PowerAccount } from '../src/sgcc/types.js';
 import { PluginStore, atomicWrite } from '../src/services/store.js';
 import { StateGridPlatform } from '../src/platform.js';
+import { resolveAppearance } from '../src/services/appearance.js';
+import { renderCard } from '../src/renderer/card-svg.js';
 import { estimateCharge } from '../src/services/summary.js';
 
 const require = createRequire(import.meta.url);
@@ -133,5 +135,51 @@ describe('设置页草稿预览', () => {
     const html = readFileSync(join(process.cwd(), 'homebridge-ui/public/index.html'), 'utf8');
     expect(() => new Script(html.match(/<script>([\s\S]*?)<\/script>/)![1])).not.toThrow();
     expect(html).toContain('kind: smsKind');
+  });
+});
+
+
+describe('摄像头名称与地区显示', () => {
+  it('默认名称与户号、地址无关，地区默认隐藏', () => {
+    expect(resolveAppearance('12345678', '河北省示例市测试区*', undefined)).toEqual({name: '国家电网', showRegion: false, region: undefined});
+    expect(resolveAppearance('87654321', '北京市测试区*', undefined).name).toBe('国家电网');
+  });
+  it('户号可单独命名，地区开关独立于名称', () => {
+    const first = resolveAppearance('first', '河北省示例市测试区测试路1号', {name: '父母家用电', showRegion: true});
+    const second = resolveAppearance('second', '河北省示例市测试区*', {name: '自家用电', showRegion: false});
+    expect(first).toEqual({name: '父母家用电', showRegion: true, region: '河北省示例市测试区'});
+    expect(second).toMatchObject({name: '自家用电', region: undefined});
+  });
+  it('保留显式配置名称，按户号的显示开关优先于全局', () => {
+    const config = {showRegion: true, accounts: [{consNo: 'first', title: '客厅用电'}]};
+    expect(resolveAppearance('first', '河南省新乡市红旗区*', {showRegion: false}, config)).toMatchObject({name: '客厅用电', region: undefined});
+    expect(resolveAppearance('first', '河南省新乡市红旗区*', undefined, config).region).toBe('河南省新乡市红旗区');
+  });
+  it('名称与显示设置持久化且不改变字段顺序', () => {
+    const store = new PluginStore(storage()); store.saveFields(['balance']); store.saveAppearance('first', {name: '父母家用电', showRegion: true});
+    expect(store.loadAppearance()).toEqual({first: {name: '父母家用电', showRegion: true}}); expect(store.loadFields()).toEqual(['balance']);
+    expect(() => store.saveAppearance('first', {name: '电', showRegion: true})).toThrow('2～32');
+  });
+  it('渲染器只在开启时输出地区，标题始终是摄像头名称', () => {
+    const base = {title: '国家电网', primaryLabel: '账户余额', dailySeries: [], updatedAt: Date.now()};
+    expect(renderCard(base)).not.toContain('河北省');
+    expect(renderCard({...base, region: '河北省示例市测试区'})).toContain('河北省示例市测试区');
+    expect(renderCard({...base, region: '河北省示例市测试区'})).toContain('国家电网');
+  });
+  it('只更改 HomeKit 名称特征，不更换配件 UUID', () => {
+    const p = platform(storage()); const set = vi.fn(); const update = vi.fn(); const information = {setCharacteristic: set};
+    p.api.hap = {Service: {AccessoryInformation: 'info'}, Characteristic: {Name: 'name', ConfiguredName: 'configured'}}; p.api.updatePlatformAccessories = update;
+    const accessory = {UUID: 'unchanged-uuid', displayName: '旧户号名称', getService: () => information}; const entry = {accessory};
+    p.applyAppearance(entry, account); expect(accessory.UUID).toBe('unchanged-uuid'); expect(accessory.displayName).toBe('国家电网');
+    expect(set).toHaveBeenCalledWith('name', '国家电网'); expect(set).toHaveBeenCalledWith('configured', '国家电网'); p.stop();
+  });
+  it('名称和地区草稿可预览，但只有明确保存才落盘', () => {
+    const gateway = new UiGateway(storage()); const cacheAccount = {consNo: 'first', consNoMasked: 'first', title: '旧地区标题', address: '河北省示例市测试区*', enabled: true};
+    gateway.store.saveAccountsCache({updatedAt: Date.now(), accounts: [cacheAccount]});
+    const result = gateway.previewDraft({consNo: 'first', name: '父母家用电', showRegion: true});
+    expect(result.appearance).toMatchObject({name: '父母家用电', showRegion: true, region: '河北省示例市测试区'});
+    expect(gateway.store.loadAppearance()).toEqual({});
+    gateway.setAppearance({consNo: 'first', name: '父母家用电', showRegion: true});
+    expect(gateway.previewDraft({consNo: 'first'}).appearance.name).toBe('父母家用电');
   });
 });

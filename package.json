@@ -1,6 +1,6 @@
 {
   "name": "homebridge-state-grid",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "国家电网「网上国网」用电数据 Homebridge 插件，以虚拟摄像头卡片形式展示在 Apple 家庭",
   "author": {
     "name": "roninriddle",
@@ -32,7 +32,8 @@
     "homebridge-ui",
     "config.schema.json",
     "LICENSE",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

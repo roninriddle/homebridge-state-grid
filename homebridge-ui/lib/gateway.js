@@ -34,6 +34,7 @@ const { assembleProfile } = loadDist('services/device-profile.js');
 const { StateGridClient } = loadDist('sgcc/client.js');
 const { renderCompactCard } = loadDist('renderer/card-svg.js');
 const { renderJpeg, renderPng } = loadDist('renderer/image-renderer.js');
+const { resolveAppearance } = loadDist('services/appearance.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
 const {
   FIELD_KEYS,
@@ -231,7 +232,7 @@ class UiGateway {
       connected: runtime?.state === 'ready',
       runtimeState: runtime?.state ?? 'starting',
       runtimeMessage: runtime?.message ?? '等待主进程启动',
-      build: '0.6.0-stability-preview-20261029',
+      build: '0.7.0',
     };
   }
 
@@ -278,7 +279,7 @@ class UiGateway {
       name: account.name || '',
       address: account.address || '',
       consType: account.consType || '',
-      title: this.displayConfig().accounts?.find((a) => a.consNo === account.consNoSrc)?.title || this.titleOf(account),
+      title: this.appearanceFor(account.consNoSrc, account.address).name,
       province: String((session && session.userInfo && session.userInfo.addressProvince) || ''),
       enabled: visibility[account.consNoSrc] !== false,
     }));
@@ -286,8 +287,7 @@ class UiGateway {
 
   /** 户号显示名：只取地区，不暴露脱敏真实姓名。 */
   titleOf(account) {
-    const region = regionFromAddress(account.address || '');
-    return region || `用电 ${account.consNoSrc.slice(-4)}`;
+    return this.appearanceFor(account.consNoSrc, account.address).name;
   }
 
   /** 把联网拉到的户号元信息合并进缓存，保留已有快照摘要。 */
@@ -373,6 +373,17 @@ class UiGateway {
     } catch { return {}; }
   }
 
+  appearanceFor(consNo, address, config = this.displayConfig()) {
+    return resolveAppearance(consNo, address || '', this.store.loadAppearance()[consNo], config);
+  }
+
+  setAppearance(payload = {}) {
+    const account = this.store.loadAccountsCache()?.accounts.find((item) => item.consNo === payload.consNo);
+    if (!account) throw new Error('请先选择已有户号');
+    this.store.saveAppearance(payload.consNo, { name: payload.name, showRegion: payload.showRegion });
+    return { ok: true, appearance: this.appearanceFor(payload.consNo, account.address) };
+  }
+
   /** 草稿仅重绘本地缓存；绝不创建客户端或请求国网，也不改正式配置。 */
   previewDraft(payload = {}) {
     const config = this.displayConfig();
@@ -392,11 +403,16 @@ class UiGateway {
     };
     const fields = normalizeFieldOrder(payload.fields ?? this.currentFields());
     const theme = payload.theme === 'dark' || payload.theme === 'light' ? payload.theme : config.theme || 'light';
-    const title = config.accounts?.find((item) => item.consNo === account?.consNo)?.title || account?.title || '家庭用电';
+    const savedAppearance = this.appearanceFor(account?.consNo || '', account?.address || '', config);
+    const draftAppearance = { ...this.store.loadAppearance()[account?.consNo || ''] };
+    if (typeof payload.name === 'string') draftAppearance.name = payload.name.trim().slice(0, 64);
+    if (typeof payload.showRegion === 'boolean') draftAppearance.showRegion = payload.showRegion;
+    const appearance = resolveAppearance(account?.consNo || '', account?.address || '', draftAppearance, config);
+    const title = appearance.name;
     const staleNote = source === 'sample' ? '模拟数据 · 仅供排版预览' : account?.lastError ? '最近更新失败 · 显示缓存' : Date.now() - data.updatedAt > 26 * 3600000 ? '数据未更新 · 显示缓存' : undefined;
-    const png = renderPng(renderCompactCard(snapshotToCard(data, { title, fields, theme, staleNote })), { width: 960 });
+    const png = renderPng(renderCompactCard(snapshotToCard(data, { title, region: appearance.region, fields, theme, staleNote })), { width: 960 });
     return { ok: true, image: 'data:image/png;base64,' + png.toString('base64'), source, updatedAt: snapshot?.updatedAt ?? null, fields, theme,
-      accounts: accounts.map((a) => ({consNo: a.consNo, title: a.title || a.consNoMasked})), selected: account?.consNo ?? '' };
+      appearance, savedAppearance, accounts: accounts.map((a) => ({consNo: a.consNo, title: this.appearanceFor(a.consNo, a.address).name + ' · ' + a.consNoMasked})), selected: account?.consNo ?? '' };
   }
 
   /**
@@ -413,8 +429,8 @@ class UiGateway {
       const snapshot = await client.snapshot(account);
       const config = this.displayConfig();
       const theme = options?.theme || config.theme || 'light';
-      const title = options?.title || config.accounts?.find((a) => a.consNo === consNo)?.title || this.titleOf(account);
-      const card = snapshotToCard(snapshot, { title, theme, fields: this.currentFields() });
+      const appearance = this.appearanceFor(consNo, account.address, config);
+      const card = snapshotToCard(snapshot, { title: appearance.name, region: appearance.region, theme, fields: this.currentFields() });
       const jpeg = await renderJpeg(renderCompactCard(card), { width: 640, quality: 80 });
       // 回写缓存：预览图 + 快照摘要，供下次打开设置页离线展示。
       this.store.saveCachedPreview(account.consNoSrc, jpeg);

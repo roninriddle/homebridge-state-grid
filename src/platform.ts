@@ -32,6 +32,7 @@ import { normalizeFieldOrder, type FieldKey } from './renderer/fields.js';
 import { fallbackCardSvg, pngToJpeg, renderPng } from './renderer/image-renderer.js';
 import { UsageCamera } from './camera/camera-accessory.js';
 import { PluginStore, atomicWrite } from './services/store.js';
+import { resolveAppearance } from './services/appearance.js';
 import { snapshotToCard, cachedSnapshot } from './services/card.js';
 import { assembleProfile } from './services/device-profile.js';
 import { formatClock } from './renderer/format.js';
@@ -48,6 +49,7 @@ export const PLUGIN_NAME = 'homebridge-state-grid';
 interface AccountConfig {
   consNo?: string;
   title?: string;
+  showRegion?: boolean;
   enabled?: boolean;
 }
 
@@ -56,6 +58,7 @@ export interface StateGridConfig extends PlatformConfig {
   password?: string;
   updateIntervalHours?: number;
   theme?: 'light' | 'dark';
+  showRegion?: boolean;
   snapshotWidth?: number;
   snapshotHeight?: number;
   accounts?: AccountConfig[];
@@ -68,6 +71,7 @@ interface CameraEntry {
   camera: UsageCamera;
   consNo: string;
   title: string;
+  region?: string;
   /** HomeKit 快照（JPEG），有人打开摄像头时直接返回。 */
   jpeg?: Buffer;
   /** ffmpeg 的循环输入帧（PNG），视频流用它。 */
@@ -106,6 +110,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   /** 监听设置页写入的字段顺序/户号开关，实时同步 HomeKit。 */
   private configWatcher: NodeJS.Timeout | null = null;
   private lastFieldsRaw = '';
+  private lastAppearanceRaw = '';
   private lastVisibilityRaw = '';
   /** 需要人工处理的状态（短信验证 / 风控挑战），供 UI 读取。 */
   private readonly status: {
@@ -279,9 +284,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private startConfigWatcher(): void {
     if (this.configWatcher) return;
     // 初始化基线，避免启动时把「首次读到的内容」误判成变化。
+    this.lastAppearanceRaw = this.store.readAppearanceRaw();
     this.lastFieldsRaw = this.store.readFieldsRaw();
     this.lastVisibilityRaw = this.store.readVisibilityRaw();
     this.configWatcher = setInterval(() => {
+      void this.reconcileAppearance().catch((error) => this.log.warn(`名称更新失败：${(error as Error).message}`));
       this.reconcileFields();
       void this.reconcileVisibility();
     }, 8_000);
@@ -442,13 +449,35 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private titleFor(account: PowerAccount): string {
-    const match = this.configFor(account);
-    const configured = match?.title?.trim();
-    if (configured) return configured;
-    // 户号名称只显示地区，不暴露脱敏真实姓名。
-    const region = regionFromAddress(account.address || '');
-    if (region) return region;
-    return `用电 ${account.consNoSrc.slice(-4)}`;
+    return this.appearanceFor(account).name;
+  }
+
+  private appearanceFor(account: PowerAccount) {
+    return resolveAppearance(account.consNoSrc, account.address || '', this.store.loadAppearance()[account.consNoSrc], this.config);
+  }
+
+  private applyAppearance(entry: CameraEntry, account: PowerAccount, persist = true): void {
+    const appearance = this.appearanceFor(account);
+    entry.title = appearance.name;
+    entry.region = appearance.region;
+    entry.accessory.displayName = appearance.name;
+    const information = entry.accessory.getService(this.api.hap.Service.AccessoryInformation);
+    information?.setCharacteristic(this.api.hap.Characteristic.Name, appearance.name);
+    if (this.api.hap.Characteristic.ConfiguredName) information?.setCharacteristic(this.api.hap.Characteristic.ConfiguredName, appearance.name);
+    if (persist) this.api.updatePlatformAccessories([entry.accessory]);
+  }
+
+  private async reconcileAppearance(): Promise<void> {
+    const raw = this.store.readAppearanceRaw();
+    if (raw === this.lastAppearanceRaw) return;
+    this.lastAppearanceRaw = raw;
+    for (const account of this.accounts()) {
+      const entry = this.entries.get(account.consNoSrc);
+      if (!entry) continue;
+      this.applyAppearance(entry, account);
+      if (entry.snapshot) await this.paint(entry);
+    }
+    this.persistStatus();
   }
 
   private refreshAll(): Promise<void> {
@@ -511,6 +540,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
           address: account.address || '',
           consType: account.consType || '',
           title: this.titleFor(account),
+        showRegion: this.appearanceFor(account).showRegion,
           enabled: this.enabled(account),
           lastSuccess: entry?.lastSuccess ?? saved?.lastSuccess ?? null,
           lastError: entry?.lastError ?? null,
@@ -529,7 +559,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     if (!entry.snapshot) return;
     const stale = entry.snapshot.updatedAt < Date.now() - STALE_AFTER_MS;
     const card = snapshotToCard(entry.snapshot, {
-      title: entry.title, fields: this.fields, theme: this.theme,
+      title: entry.title, region: entry.region, fields: this.fields, theme: this.theme,
       staleNote: entry.lastError ? `更新失败 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : stale ? `数据未更新 · 最近成功 ${formatClock(entry.snapshot.updatedAt)}` : undefined,
     });
     try {
@@ -581,7 +611,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   }
 
   private async detailSnapshot(title: string, snapshot: AccountSnapshot): Promise<Buffer> {
-    const card = snapshotToCard(snapshot, { title, fields: this.fields, theme: this.theme });
+    const account = this.accounts().find((item) => item.consNoSrc === snapshot.consNo);
+    const card = snapshotToCard(snapshot, { title, region: account ? this.appearanceFor(account).region : undefined, fields: this.fields, theme: this.theme });
     return pngToJpeg(renderPng(renderCard(card), { width: 1920 }), { quality: 90 });
   }
 
@@ -648,6 +679,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     });
 
     this.entries.set(account.consNoSrc, entry);
+    this.applyAppearance(entry, account, false);
     this.attachCameraController(accessory, entry);
     const saved = this.store.loadAccountsCache()?.accounts.find((item) => item.consNo === entry.consNo);
     entry.snapshot = cachedSnapshot(saved?.data ?? saved?.snapshot);
@@ -657,6 +689,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
     if (!cached) {
       this.api.registerPlatformAccessories(PLUGIN_NAME, PLATFORM_NAME, [accessory]);
+    } else {
+      this.api.updatePlatformAccessories([accessory]);
     }
     return entry;
   }

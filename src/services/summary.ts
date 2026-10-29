@@ -75,8 +75,9 @@ export function maskPhone(value: string): string {
  * 户号名只显示地区，不暴露脱敏真实姓名。
  */
 export function regionFromAddress(address: string): string {
-  const region = (address || '').split('*')[0].trim();
-  if (!region) return '';
-  // 去掉省级前缀（如"河北省"→"石家庄市裕华区"）；直辖市（"北京市"）不含"省"，原样保留。
-  return region.replace(/^[\u4e00-\u9fa5]{1,3}省/, '').trim();
+  const prefix = (address || '').split('*')[0].trim();
+  // 只保留行政区划，省份也可显示；不把街道、门牌拼到卡片上。
+  const match = /^(?:[\u4e00-\u9fa5]{2,12}?(?:省|自治区|特别行政区))?(?:[\u4e00-\u9fa5]{2,10}?(?:市|自治州|地区|盟))?(?:[\u4e00-\u9fa5]{1,10}?区|[\u4e00-\u9fa5]{1,10}?县|[\u4e00-\u9fa5]{1,10}?旗)?/.exec(prefix);
+  const region = match?.[0] || '';
+  return /社区$|小区$/.test(region) ? region.slice(0, region.lastIndexOf('市') + 1) : region;
 }

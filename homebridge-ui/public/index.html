@@ -246,7 +246,7 @@
             不在列表里 = 不显示。保存后主进程会在几秒内自动重新渲染卡片，无需重启 Homebridge。
           </p>
           <div class="actions" style="margin-top: 0">
-            <button class="primary" id="fieldsSaveBtn">保存</button>
+            <button class="primary" id="fieldsSaveBtn">保存指标</button>
             <button id="fieldsResetBtn">恢复默认</button>
             <span class="meta" id="fieldsMeta"></span>
           </div>
@@ -264,11 +264,14 @@
             <h3>实时预览</h3>
             <p class="preview-note">调整指标后即时重绘，保存后应用到家庭卡片。</p>
             <label for="previewAccount">预览户号</label><select id="previewAccount"><option value="">模拟卡片</option></select>
+            <label for="cameraName">摄像头名称（当前户号）</label><input id="cameraName" maxlength="32" placeholder="国家电网" value="国家电网" />
+            <label class="switch"><input type="checkbox" id="showRegion" /><span>显示卡片顶部的省市区</span></label>
+            <button id="appearanceSaveBtn" disabled>保存名称与地区显示</button>
             <label for="previewTheme">预览主题</label><select id="previewTheme"><option value="">跟随正式设置</option><option value="light">浅色</option><option value="dark">深色</option></select>
             <img id="draftImage" alt="卡片指标实时预览" />
             <p class="preview-note" id="draftSource" aria-live="polite">正在读取本地缓存…</p>
             <p class="preview-note" id="draftState" aria-live="polite">指标尚未修改</p>
-            <p class="preview-note">预览主题仅用于查看效果；保存按钮保存指标。没有缓存时使用明确标注的模拟数据。</p>
+            <p class="preview-note">名称和地区显示按户号保存；指标顺序由“保存指标”应用。预览主题仅用于查看效果。无缓存时明确标注模拟数据。</p>
           </aside></div>
           <div class="tip hidden" id="fieldsTip"></div>
         </section>
@@ -626,15 +629,40 @@
       let fieldSaved = '[]';
       let draftTimer;
       let previewSequence = 0;
+      const appearanceDrafts = new Map();
+      const appearanceSaved = new Map();
+      function updateDraftState() {
+        const selected = $('previewAccount').value;
+        const draft = appearanceDrafts.get(selected);
+        const saved = appearanceSaved.get(selected);
+        const appearanceDirty = draft && (!saved || (draft.name.trim() || '国家电网') !== saved.name || draft.showRegion !== saved.showRegion);
+        const dirty = JSON.stringify(fieldActive) !== fieldSaved || appearanceDirty;
+        $('draftState').textContent = dirty ? '草稿未保存 · 正式卡片未改变' : '当前配置已保存';
+      }
+      function editAppearance() {
+        appearanceDrafts.set($('previewAccount').value, {name: $('cameraName').value, showRegion: $('showRegion').checked});
+        scheduleDraft();
+      }
+      $('cameraName').addEventListener('input', editAppearance);
+      $('showRegion').addEventListener('change', editAppearance);
+      $('appearanceSaveBtn').addEventListener('click', () => withBusy($('appearanceSaveBtn'), async () => {
+        const consNo = $('previewAccount').value;
+        const result = await bridge.request('/appearance-save', {consNo, name: $('cameraName').value, showRegion: $('showRegion').checked});
+        if (!result.ok) { showTip('fieldsTip', result.message || '保存失败', 'err'); return; }
+        appearanceSaved.set(consNo, result.appearance); appearanceDrafts.delete(consNo);
+        scheduleDraft(); showTip('fieldsTip', '名称与地区显示已保存，几秒内应用到摄像头。', '');
+      }));
       function scheduleDraft() {
         const sequence = ++previewSequence;
         clearTimeout(draftTimer);
         draftTimer = setTimeout(() => void loadDraft(sequence), 250);
-        $('draftState').textContent = JSON.stringify(fieldActive) === fieldSaved ? '指标已保存' : '草稿未保存 · 正式卡片未改变';
+        updateDraftState();
       }
       async function loadDraft(sequence) {
         try {
-          const result = await bridge.request('/preview-draft', {consNo: $('previewAccount').value || undefined, fields: fieldActive, theme: $('previewTheme').value || undefined});
+          const selectedConsNo = $('previewAccount').value;
+          const appearance = appearanceDrafts.get(selectedConsNo);
+          const result = await bridge.request('/preview-draft', {consNo: selectedConsNo || undefined, fields: fieldActive, theme: $('previewTheme').value || undefined, ...appearance});
           if (sequence !== previewSequence) return;
           if (!result.ok) { $('draftSource').textContent = result.message || '预览失败'; return; }
           const selector = $('previewAccount');
@@ -645,6 +673,10 @@
           }
           if (!selector.options.length) { const option = document.createElement('option'); option.value = ''; option.textContent = '模拟卡片'; selector.appendChild(option); }
           selector.value = selected;
+          appearanceSaved.set(selected, result.savedAppearance);
+          if (result.appearance) { $('cameraName').value = result.appearance.name; $('showRegion').checked = result.appearance.showRegion; }
+          $('appearanceSaveBtn').disabled = !selected;
+          updateDraftState();
           $('draftImage').src = result.image;
           $('draftSource').textContent = result.source === 'sample' ? '模拟数据 · 仅供排版预览' : '本地缓存 · 最近成功 ' + new Date(result.updatedAt).toLocaleString('zh-CN', {hour12: false});
         } catch (error) { if (sequence === previewSequence) $('draftSource').textContent = error.message || '预览失败'; }

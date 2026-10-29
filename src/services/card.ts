@@ -4,7 +4,7 @@ import type { CardData } from '../renderer/card-svg.js';
 import type { FieldKey } from '../renderer/fields.js';
 import { estimateCharge } from './summary.js';
 
-export function snapshotToCard(snapshot: AccountSnapshot, options: {title: string; theme?: 'light' | 'dark'; fields?: FieldKey[]; staleNote?: string}): CardData {
+export function snapshotToCard(snapshot: AccountSnapshot, options: {title: string; region?: string; theme?: 'light' | 'dark'; fields?: FieldKey[]; staleNote?: string}): CardData {
   return {
     ...snapshot,
     ...options,
