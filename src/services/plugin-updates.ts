@@ -82,6 +82,7 @@ export class PluginUpdates {
   private startupTimer?: NodeJS.Timeout;
   private timer?: NodeJS.Timeout;
   private notifiedVersion?: string;
+  private backgroundRunning = false;
   constructor(readonly storagePath: string, readonly packageRoot = resolve(__dirname, '../..'), private readonly options: Options = {}) {
     this.directory = join(storagePath, 'state-grid', 'updates'); mkdirSync(this.directory, {recursive: true, mode: 0o700});
     this.request = options.fetch || fetch; this.now = options.now || Date.now;
@@ -103,12 +104,24 @@ export class PluginUpdates {
   }
   setEnabled(enabled: boolean) { if (typeof enabled !== 'boolean') throw new Error('请选择是否自动检查更新'); write(join(this.directory, 'settings.json'), {enabled: enabled !== false}); return this.status(); }
   start(notify?: (message: string) => void): void {
-    if (this.timer) return;
-    const check = () => {void this.check().then(status => {if (!status.error && status.updateAvailable && status.latestVersion !== this.notifiedVersion) {this.notifiedVersion = status.latestVersion || undefined; notify?.(`插件有新版本 ${status.latestVersion}，可在设置页“插件更新”查看。`);}}).catch(() => {});};
+    if (this.backgroundRunning) return;
+    this.backgroundRunning = true;
+    const check = () => {
+      void this.check().then(status => {
+        if (!status.error && status.updateAvailable && status.latestVersion !== this.notifiedVersion) {
+          this.notifiedVersion = status.latestVersion || undefined;
+          notify?.(`插件有新版本 ${status.latestVersion}，可在设置页“插件更新”查看。`);
+        }
+      }).catch(() => {}).finally(() => {
+        if (!this.backgroundRunning) return;
+        const status = this.status();
+        const wait = status.enabled ? Math.max(30_000, Math.min(RETRY_INTERVAL, (status.nextCheckAt || this.now() + CHECK_INTERVAL) - this.now())) : RETRY_INTERVAL;
+        this.timer = setTimeout(check, wait); this.timer.unref?.();
+      });
+    };
     this.startupTimer = setTimeout(check, 30_000); this.startupTimer.unref?.();
-    this.timer = setInterval(check, RETRY_INTERVAL); this.timer.unref?.();
   }
-  stop(): void {clearTimeout(this.startupTimer); clearInterval(this.timer); this.startupTimer = undefined; this.timer = undefined;}
+  stop(): void {this.backgroundRunning = false; clearTimeout(this.startupTimer); clearTimeout(this.timer); this.startupTimer = undefined; this.timer = undefined;}
   check(force = false): Promise<ReturnType<PluginUpdates['status']>> {
     if (this.inFlight) return this.inFlight;
     const cache = read<CheckCache>(join(this.directory, 'check.json'), {});
