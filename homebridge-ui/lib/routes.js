@@ -92,6 +92,10 @@ function registerRoutes(server, gateway) {
   server.onRequest('/preview-draft', safe(async (payload) => gateway.previewDraft(payload)));
   server.onRequest('/card-draft', safe(async (payload) => gateway.cardDraft(payload)));
   server.onRequest('/card-apply', safe(async () => gateway.applyCardConfig()));
+  server.onRequest('/updates', safe(async () => gateway.updates.status()));
+  server.onRequest('/updates-check', safe(async () => gateway.updates.check(true)));
+  server.onRequest('/updates-setting', safe(async (payload) => gateway.updates.setEnabled(payload.enabled)));
+  server.onRequest('/updates-install', safe(async (payload) => gateway.updates.install(payload.version)));
 
   /** 单户号数据 + 卡片预览图。 */
   server.onRequest(

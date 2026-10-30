@@ -9,3 +9,6 @@ dist/
 .vendorpkg/
 tools/.refstage/
 coverage/
+
+# 发布时由 package-lock.json 生成
+npm-shrinkwrap.json

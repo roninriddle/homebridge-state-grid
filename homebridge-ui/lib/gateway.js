@@ -36,6 +36,7 @@ const { renderCompactCard } = loadDist('renderer/card-svg.js');
 const { renderJpeg, renderPng } = loadDist('renderer/image-renderer.js');
 const { resolveAppearance } = loadDist('services/appearance.js');
 const { normalizeCardSettings } = loadDist('services/card-settings.js');
+const { PluginUpdates } = loadDist('services/plugin-updates.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
 const {
   FIELD_KEYS,
@@ -72,6 +73,7 @@ class UiGateway {
   constructor(storagePath) {
     this.storagePath = storagePath;
     this.store = new PluginStore(storagePath);
+    this.updates = new PluginUpdates(storagePath, path.resolve(__dirname, '../..'));
     /** @type {import('../dist/sgcc/client.js').StateGridClient | null} */
     this.client = null;
     /** 短信验证码的中间状态：codeKey 只在本次会话内有效。 */
@@ -233,7 +235,7 @@ class UiGateway {
       connected: runtime?.state === 'ready',
       runtimeState: runtime?.state ?? 'starting',
       runtimeMessage: runtime?.message ?? '等待主进程启动',
-      build: '0.7.2',
+      build: this.updates.installedVersion(),
     };
   }
 

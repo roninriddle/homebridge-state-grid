@@ -200,6 +200,17 @@
         </section>
 
         <section class="panel">
+          <h2>插件更新</h2>
+          <p class="hint">自动检查 GitHub 正式版本，每 12 小时一次。发现新版本后由你选择安装。</p>
+          <div class="status"><strong id="updateVersion">正在读取版本…</strong><span class="meta" id="updateLatest"></span></div>
+          <label class="switch"><input type="checkbox" id="updateEnabled" checked /><span>自动检查更新</span></label>
+          <p class="preview-note" id="updateChecked"></p>
+          <div class="actions"><button id="updateCheckBtn">立即检查</button><a id="updateRelease" href="https://github.com/roninriddle/homebridge-state-grid/releases" target="_blank" rel="noopener noreferrer">查看发布说明</a><button class="primary hidden" id="updateInstallBtn">安装更新</button></div>
+          <div class="tip hidden" id="updateTip" aria-live="polite"></div>
+          <p class="hint" id="updateRestart" hidden>安装已完成，请到插件页重启“国家电网”子网桥，再重新打开设置页。</p>
+        </section>
+
+        <section class="panel">
           <h2>账号登录</h2>
           <p class="hint">
             用「网上国网」App 的手机号登录。密码登录被拒绝时，可检查 App 中的账号状态，或尝试短信验证码登录；安全校验按服务端提示完成。
@@ -533,6 +544,47 @@
           setDot('err', error.message || String(error));
         }
       }
+
+      let offeredVersion = '';
+      function renderUpdates(status) {
+        $('updateVersion').textContent = '已安装 ' + status.installedVersion;
+        $('updateLatest').textContent = status.latestVersion ? '最新正式版 ' + status.latestVersion : '暂无正式发布版本';
+        $('updateEnabled').checked = status.enabled;
+        $('updateChecked').textContent = status.checkedAt ? '上次检查 ' + new Date(status.checkedAt).toLocaleString('zh-CN', {hour12:false}) : '尚未检查';
+        $('updateRelease').href = status.releaseUrl;
+        offeredVersion = status.canInstall ? status.latestVersion : '';
+        $('updateInstallBtn').classList.toggle('hidden', !offeredVersion);
+        $('updateInstallBtn').textContent = '安装 ' + offeredVersion;
+        $('updateRestart').hidden = !status.restartRequired;
+        showTip('updateTip', status.error || (status.operation?.state === 'failed' ? '上次安装失败：' + status.operation.error : '') || (status.updateAvailable ? (status.canInstall ? '发现新版本，安装前会校验并备份当前插件。' : '发现新版本，发布包尚未就绪，请稍后检查。') : status.latestVersion ? '当前已是最新版本。' : ''), status.error ? 'warn' : '');
+      }
+      async function loadUpdates() {
+        try { const status = await bridge.request('/updates'); if (status.ok) renderUpdates(status); }
+        catch (error) {showTip('updateTip', error.message || '读取更新状态失败', 'err');}
+      }
+      $('updateCheckBtn').addEventListener('click', () => withBusy($('updateCheckBtn'), async () => {
+        try {const status = await bridge.request('/updates-check'); if (!status.ok) throw new Error(status.message); renderUpdates(status);}
+        catch (error) {showTip('updateTip', error.message || '检查更新失败', 'err');}
+      }));
+      $('updateEnabled').addEventListener('change', async () => {
+        try {const status = await bridge.request('/updates-setting', {enabled:$('updateEnabled').checked}); if (!status.ok) throw new Error(status.message); renderUpdates(status);}
+        catch (error) {showTip('updateTip', error.message || '保存更新设置失败', 'err'); await loadUpdates();}
+      });
+      $('updateInstallBtn').addEventListener('click', () => withBusy($('updateInstallBtn'), async () => {
+        const dirty = fieldsLoaded && (JSON.stringify(fieldActive) !== fieldSaved || [...appearanceDrafts].some(([key,value]) => {
+          const saved=appearanceSaved.get(key); return !saved || (value.name.trim() || '国家电网') !== saved.name || value.showRegion !== saved.showRegion;
+        }));
+        if (dirty) {showTip('updateTip', '请先保存卡片草稿，再安装更新。', 'warn'); return;}
+        if (!offeredVersion) return;
+        showTip('updateTip', '正在下载并校验更新、安装依赖。请保持设置页打开。', '');
+        $('updateCheckBtn').disabled = true;
+        try {
+          const status = await bridge.request('/updates-install', {version:offeredVersion});
+          if (!status.ok) throw new Error(status.message || '安装失败');
+          renderUpdates(status); showTip('updateTip', '新版本已安装，原插件备份已保留。请重启国家电网子网桥。', '');
+        } catch (error) {showTip('updateTip', error.message || '更新失败，当前插件未更改。', 'err');}
+        finally {$('updateCheckBtn').disabled = false;}
+      }));
 
       function switchTab(tab) {
         const isLogin = tab === 'login';
@@ -888,6 +940,8 @@
 
       setInterval(() => { if (!$('tab-fields').classList.contains('hidden') && fieldsLoaded) scheduleDraft(); }, 30000);
       void refreshStatus();
+      void loadUpdates();
+      setInterval(() => {if (!$('tab-login').classList.contains('hidden')) void loadUpdates();}, 30000);
     </script>
   </body>
 </html>
