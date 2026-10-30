@@ -1,6 +1,6 @@
 # homebridge-state-grid
 
-当前版本：**0.7.2**。
+当前版本：**0.8.0**。
 
 把「网上国网」的用电数据做成 **HomeKit 虚拟摄像头**，在 Apple「家庭」App 首页直接看到一张用电卡片。
 
@@ -43,10 +43,10 @@
 ## 安装
 
 ```bash
-npm install -g homebridge-state-grid
+npm install -g https://github.com/roninriddle/homebridge-state-grid/releases/download/v0.8.0/homebridge-state-grid-0.8.0.tgz
 ```
 
-或在 Homebridge UI 的「插件」页搜索 `homebridge-state-grid`。
+当前正式包通过本项目 GitHub Release 分发。安装 0.8.0 后，可在插件设置页自动检查后续版本并选择安装。
 
 要求：**Node ≥ 22**（用到原生 `sm4-ecb` / `sm3`）、Homebridge ≥ 1.8。
 
@@ -68,6 +68,18 @@ npm install -g homebridge-state-grid
 `consNo` 填接口返回的**原始户号**（`consNoSrc`）。在设置页「户号与卡片预览」标签页里能看到每个户号及其卡片预览，照抄即可。
 
 `fields` 是一个**有序数组**，顺序即显示顺序：第 1 项是卡片主数字，第 2 项与它并列，其余进入下方自适应网格。日常不需要手写——设置页「卡片指标」标签页里是图形化的勾选+排序界面（共 19 个指标，默认显示 12 个）。
+
+---
+
+## 插件更新
+
+0.8.0 起可在 **连接与登录 → 插件更新** 查看已安装版本、最新正式版本、上次检查时间与发布说明。主进程默认每 12 小时检查一次 GitHub Release，设置页关闭或网上国网需要验证时也能检查；可关闭自动检查，或点击“立即检查”手动查询。检查只向本项目的 GitHub 发布接口发送插件版本，不发送手机号、户号、设备种子或登录令牌。
+
+发现新版本后点击 **安装版本号**。安装器会校验 GitHub 资产的 SHA-256，在暂存目录安装锁定依赖，并检查 Node.js、Homebridge、原生渲染与 JPEG 转码。通过后替换插件目录并保留原插件备份；配置、登录态、设备身份和户号开关保留。安装完成后到插件页重启“国家电网”子网桥，再重新打开设置页。自动检查不会自动安装，也不会自动重启。
+
+检查失败或 GitHub 限流时保留上次结果并退避重试，不影响用电卡片。安装准备失败时保留正式插件；激活目录替换失败时立即恢复旧目录。目录不可写、开发链接安装或 Windows 环境可查看发布页，并使用 Homebridge 插件管理器处理安装。
+
+正式版本由 Git 标签触发 `.github/workflows/release.yml`：校验版本号、运行测试及视频专项、生成含 `dist/` 与依赖锁文件的 `.tgz` 和 `SHA256SUMS`，上传成功后公开 Release。预览版不会进入更新提示。尚未上传完整校验资产的版本只显示发布说明，不能安装。
 
 ---
 

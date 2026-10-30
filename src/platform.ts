@@ -35,6 +35,7 @@ import { PluginStore, atomicWrite } from './services/store.js';
 import { resolveAppearance } from './services/appearance.js';
 import { snapshotToCard, cachedSnapshot } from './services/card.js';
 import { assembleProfile } from './services/device-profile.js';
+import { PluginUpdates } from './services/plugin-updates.js';
 import { formatClock } from './renderer/format.js';
 import {
   estimateCharge,
@@ -99,6 +100,8 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   private readonly entries = new Map<string, CameraEntry>();
   private client: StateGridClient | null = null;
   private store: PluginStore;
+  private readonly updates: PluginUpdates;
+  private readonly runningVersion: string;
   private refreshInFlight: Promise<void> | null = null;
   private retryTimer: NodeJS.Timeout | null = null;
   private retryDelay = 60_000;
@@ -125,8 +128,11 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     private readonly api: API,
   ) {
     this.store = new PluginStore(this.api.user.storagePath());
+    this.updates = new PluginUpdates(this.api.user.storagePath());
+    this.runningVersion = this.updates.installedVersion();
 
     this.api.on('didFinishLaunching', () => {
+      this.updates.start((message) => this.log.info(message));
       void this.bootstrap();
     });
     this.api.on('shutdown', () => {
@@ -818,6 +824,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
 
   private stop(): void {
     this.stopped = true;
+    this.updates.stop();
     this.stopVerifyPolling();
     if (this.retryTimer) clearTimeout(this.retryTimer);
     this.retryTimer = null;
@@ -832,6 +839,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   statusSnapshot(): Record<string, unknown> {
     return {
       state: this.status.state,
+      pluginVersion: this.runningVersion,
       message: this.status.message,
       updatedAt: this.status.updatedAt,
       accounts: this.accounts().map((account) => ({

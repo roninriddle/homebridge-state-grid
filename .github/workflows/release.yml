@@ -1,0 +1,43 @@
+name: Release plugin
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Validate tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: node -e 'if (process.env.RELEASE_TAG !== "v" + require("./package.json").version) throw Error("Tag/version mismatch")'
+      - run: npm ci
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-noto-cjk
+      - run: npm test
+      - run: npm run test:stream
+      - run: npm run probe
+      - name: Package release
+        run: |
+          node tools/prepare-package.mjs
+          npm pack --ignore-scripts --json > pack.json
+          node -e 'const fs=require("fs");const p=require("./pack.json")[0];if (!p.files.some(f=>f.path==="npm-shrinkwrap.json")) throw Error("Missing lockfile");fs.writeFileSync("asset-name.txt",p.filename)'
+          sha256sum "$(cat asset-name.txt)" > SHA256SUMS
+          node tools/release-notes.mjs > release-notes.md
+      - name: Publish verified assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$RELEASE_TAG" "$(cat asset-name.txt)" SHA256SUMS --draft --verify-tag --title "$RELEASE_TAG" --notes-file release-notes.md
+          gh release edit "$RELEASE_TAG" --draft=false --latest

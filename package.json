@@ -1,6 +1,6 @@
 {
   "name": "homebridge-state-grid",
-  "version": "0.7.2",
+  "version": "0.8.0",
   "description": "国家电网「网上国网」用电数据 Homebridge 插件，以虚拟摄像头卡片形式展示在 Apple 家庭",
   "author": {
     "name": "roninriddle",
@@ -33,7 +33,8 @@
     "config.schema.json",
     "LICENSE",
     "README.md",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "npm-shrinkwrap.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -43,17 +44,21 @@
     "demo": "npm run build && node dist/tools/demo-render.js",
     "prepublishOnly": "npm test",
     "probe": "npm run build && node tools/ui-probe.mjs",
-    "test:stream": "npm run build && SGCC_STREAM_TEST=1 vitest run tests/stream.test.ts"
+    "test:stream": "npm run build && SGCC_STREAM_TEST=1 vitest run tests/stream.test.ts",
+    "prepack": "npm run build && node tools/prepare-package.mjs"
   },
   "dependencies": {
     "@homebridge/camera-utils": "^3.0.0",
     "@homebridge/plugin-ui-utils": "^2.0.0",
     "@resvg/resvg-js": "^2.6.2",
     "ffmpeg-for-homebridge": "^2.1.0",
-    "sm-crypto": "^0.5.8"
+    "semver": "^7.8.5",
+    "sm-crypto": "^0.5.8",
+    "tar": "^7.5.22"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/semver": "^7.8.0",
     "homebridge": "^2.4.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
