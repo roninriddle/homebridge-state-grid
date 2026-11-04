@@ -37,6 +37,7 @@ const { renderJpeg, renderPng } = loadDist('renderer/image-renderer.js');
 const { resolveAppearance } = loadDist('services/appearance.js');
 const { normalizeCardSettings } = loadDist('services/card-settings.js');
 const { PluginUpdates } = loadDist('services/plugin-updates.js');
+const { WidgetSettings } = loadDist('services/widgets.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
 const {
   FIELD_KEYS,
@@ -73,6 +74,7 @@ class UiGateway {
   constructor(storagePath) {
     this.storagePath = storagePath;
     this.store = new PluginStore(storagePath);
+    this.widgets = new WidgetSettings(storagePath);
     this.updates = new PluginUpdates(storagePath, path.resolve(__dirname, '../..'));
     /** @type {import('../dist/sgcc/client.js').StateGridClient | null} */
     this.client = null;

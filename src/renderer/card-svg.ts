@@ -83,7 +83,7 @@ function fittedSize(value: string, desired: number, available: number): number {
 function labelFor(field: FieldValue): string {
   return field.label + (field.estimated && !/预估|估算/.test(field.label) ? ' · 估算' : '');
 }
-function fieldValues(data: CardData): FieldValue[] {
+export function fieldValues(data: CardData): FieldValue[] {
   const order = data.fields?.length ? data.fields : DEFAULT_FIELD_ORDER;
   const values: Record<FieldKey, number | undefined> = {
     balance: data.primaryValue, monthEstimateCharge: data.monthEstimateCharge,
@@ -106,7 +106,7 @@ function fieldValues(data: CardData): FieldValue[] {
     return {key, label, value: values[key], unit: meta.unit, estimated: meta.estimated};
   });
 }
-function formatField(field: FieldValue): string {
+export function formatField(field: FieldValue): string {
   return field.unit === '元' ? formatMoney(field.value) : field.unit === '档' ? formatNumber(field.value, 0) : formatUsage(field.value);
 }
 
