@@ -102,6 +102,8 @@ export interface AccountSnapshot {
   latestDailyUsage?: number;
   /** 该数据所属日期（YYYY-MM-DD）。 */
   latestDailyDate?: string;
+  /** 本次查询所属月份（YYYY-MM），跨月缓存不能冒充当月。 */
+  currentMonth?: string;
   currentMonthUsage?: number;
   currentMonthThrough?: string;
   currentMonthPartial?: boolean;

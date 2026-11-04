@@ -71,7 +71,15 @@ function render(account, note) {
   text(widget, account.title || '国家电网', Font.semiboldSystemFont(14), accent);
   if (family === 'large' && account.region) text(widget, account.region, Font.systemFont(10), muted);
   widget.addSpacer(family === 'large' ? 12 : 6);
-  const metrics = account.metrics.slice(0, family === 'small' ? 2 : family === 'large' ? 8 : 4);
+  const monthFormatter = new DateFormatter(); monthFormatter.dateFormat = 'yyyy-MM'; monthFormatter.timeZone = 'Asia/Shanghai';
+  const monthNow = monthFormatter.string(new Date());
+  const metrics = account.metrics.map(metric => {
+    if (!metric.period || metric.period === monthNow) return metric;
+    const period = (metric.period.slice(0,4) === monthNow.slice(0,4) ? '' : Number(metric.period.slice(0,4)) + '年') + Number(metric.period.slice(5)) + '月';
+    if (metric.key === 'monthEstimateCharge') return {...metric, label: period + '累计电费估算'};
+    if (metric.key === 'currentMonthUsage') return {...metric, label: period + (metric.label.includes('部分') ? '已取电量 · 部分' : '用电')};
+    return metric;
+  }).slice(0, family === 'small' ? 2 : family === 'large' ? 8 : 4);
   function cell(stack, metric, primary) {
     const column = stack.addStack(); column.layoutVertically();
     if (family !== 'small') column.size = new Size(Math.floor((Device.screenSize().width - 100) / 2), 0);
@@ -80,6 +88,7 @@ function render(account, note) {
     const line = column.addStack(); line.bottomAlignContent();
     text(line, metric.text, primary ? Font.boldSystemFont(family === 'small' ? 25 : 26) : Font.semiboldSystemFont(17), ink);
     line.addSpacer(3); text(line, metric.unit, Font.systemFont(9), muted);
+    if (metric.note) {column.addSpacer(2); text(column, family === 'large' || !metric.through || metric.text === '—' ? metric.note : '截至 ' + metric.through.slice(5), Font.systemFont(8), muted);}
   }
   if (family === 'small') {
     for (let i = 0; i < metrics.length; i++) {cell(widget, metrics[i], true); if (i === 0) widget.addSpacer(4);}
@@ -91,7 +100,7 @@ function render(account, note) {
     }
   }
   widget.addSpacer();
-  text(widget, (note || (account.stale ? '缓存 · ' : '更新 ')) + time(account.updatedAt), Font.systemFont(9), muted);
+  text(widget, (note || (account.stale || account.dataMonth && account.dataMonth !== monthNow ? '缓存 · ' : '更新 ')) + time(account.updatedAt), Font.systemFont(9), muted);
   return widget;
 }
 async function main() {

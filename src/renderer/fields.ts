@@ -43,7 +43,7 @@ export interface FieldMeta {
 
 export const FIELD_META: Record<FieldKey, FieldMeta> = {
   balance: { label: '账户余额', unit: '元' },
-  monthEstimateCharge: { label: '本月预估电费', unit: '元', estimated: true },
+  monthEstimateCharge: { label: '当月累计电费估算', unit: '元', estimated: true },
   currentMonthUsage: { label: '当月用电', unit: 'kWh' },
   latestDailyUsage: { label: '上日用电', unit: 'kWh' },
   latestPeakUsage: { label: '上日峰用电', unit: 'kWh' },

@@ -371,8 +371,8 @@
         return `${fixed}${unit ? `<small>${unit}</small>` : ''}`;
       }
 
-      function metric(key, value) {
-        return `<div class="metric"><div class="k">${key}</div><div class="v">${value}</div></div>`;
+      function metric(key, value, note) {
+        return `<div class="metric"><div class="k">${escapeHtml(key)}</div><div class="v">${value}</div>${note ? `<div class="preview-note">${escapeHtml(note)}</div>` : ''}</div>`;
       }
 
       // 快照摘要 → 指标网格（缓存与联网刷新共用同一字段结构）。
@@ -380,8 +380,8 @@
         const balanceVal = s.balance != null ? s.balance : s.amountDue;
         const basics = [
           metric(s.balance != null ? '账户余额' : '应交电费', fmt(balanceVal, '元', 2)),
-          metric('本月预估电费', fmt(s.estimate, '元', 2)),
-          metric('当月用电', fmt(s.currentMonthUsage, 'kWh', 2)),
+          metric(s.estimateInfo?.label || '累计电费估算', fmt(s.estimateInfo ? s.estimateInfo.value : undefined, '元', 2), s.estimateInfo?.note || '估算口径未确认'),
+          metric(s.currentMonthLabel || '累计用电', fmt(s.currentMonthUsage, 'kWh', 2), s.currentMonthThrough ? '截至 ' + s.currentMonthThrough : ''),
           metric('上日用电', fmt(s.latestDailyUsage, 'kWh', 2)),
           metric('上月用电', fmt(s.latestMonthUsage, 'kWh', 2)),
           metric('上月电费', fmt(s.latestMonthCharge, '元', 2)),

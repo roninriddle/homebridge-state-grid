@@ -1,3 +1,4 @@
+import type { ChargeEstimate } from '../services/billing-estimate.js';
 /**
  * 用电卡片的 SVG 生成。
  *
@@ -22,6 +23,9 @@ export interface FieldValue {
   value?: number;
   unit: FieldUnit;
   estimated?: boolean;
+  note?: string;
+  period?: string;
+  through?: string;
 }
 
 export interface CardData {
@@ -36,7 +40,9 @@ export interface CardData {
   currentMonthThrough?: string;
   currentMonthPartial?: boolean;
   latestMonth?: string;
-  /** 本月电费估算，基于上月结算均价。 */
+  currentMonthPrefix?: string;
+  chargeEstimate?: ChargeEstimate;
+  /** 截至数据日期的累计电费折算，使用最近结算月均价。 */
   monthEstimateCharge?: number;
   latestMonthUsage?: number;
   latestMonthCharge?: number;
@@ -101,9 +107,14 @@ export function fieldValues(data: CardData): FieldValue[] {
     let label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
     if (key === 'latestDailyUsage' && data.latestDailyDate) label = `用电 · ${formatDayMonth(data.latestDailyDate)}`;
     if (key.startsWith('latest') && key.endsWith('Usage') && key !== 'latestMonthUsage' && key !== 'latestDailyUsage' && data.latestDailyDate) label = `${meta.label.replace('上日', '')} · ${formatDayMonth(data.latestDailyDate)}`;
-    if (key === 'currentMonthUsage' && data.currentMonthPartial) label = '当月已取电量 · 部分';
+    const prefix = data.currentMonthPrefix || '当月';
+    if (key === 'monthEstimateCharge') label = data.chargeEstimate?.label || meta.label;
+    if (key === 'currentMonthUsage') label = `${prefix}${data.currentMonthPartial ? '已取电量 · 部分' : '用电'}`;
+    if (['monthPeakUsage','monthValleyUsage','monthFlatUsage','monthSharpUsage'].includes(key)) label = meta.label.replace('当月', prefix);
     if (key === 'ladderLevel') label = '最近账单阶梯';
-    return {key, label, value: values[key], unit: meta.unit, estimated: meta.estimated};
+    return {key, label, value: values[key], unit: meta.unit, estimated: meta.estimated,
+      ...(key === 'monthEstimateCharge' ? {note: data.chargeEstimate?.note, period: data.chargeEstimate?.month, through: data.chargeEstimate?.through} : {}),
+      ...(key === 'currentMonthUsage' ? {period: data.chargeEstimate?.month, through: data.currentMonthThrough} : {})};
   });
 }
 export function formatField(field: FieldValue): string {
@@ -139,7 +150,8 @@ function heroField(field: FieldValue, x: number, width: number, expanded: boolea
   const numberX = x + (field.unit === '元' ? 42 : 0);
   const suffix = field.unit === '元' ? '' : text(numberX + numericWidth(value) * size + 12, valueY, field.unit, 25, p.secondary);
   return `<g data-role="hero" data-field="${field.key}" data-value-size="${size}">
-${text(x, labelY, label, 26, p.secondary, 500)}
+${text(x, labelY, label, Math.min(26, width / Math.max(1, [...label].length)), p.secondary, 500)}
+${field.note ? text(x, labelY + 24, field.note, Math.min(16, width / Math.max(1, [...field.note].length)), p.secondary) : ''}
 ${field.unit === '元' ? text(x, valueY - 4, '¥', 35, p.secondary, 500) : ''}
 ${text(numberX, valueY, value, size, p.text, 600)}${suffix}
 </g>`;
@@ -156,6 +168,7 @@ function tile(field: FieldValue, box: MetricLayout, heroLimit: number, p: Palett
   const label = labelFor(field);
   const fittedLabel = Math.min(labelSize, (box.width - 2 * padding) / Math.max(1, Array.from(label).length));
   return `<g data-role="metric" data-field="${field.key}" data-value-size="${size}" data-width="${box.width}" data-height="${box.height}">
+${field.note ? `<title>${escapeXml(field.note)}</title>` : ''}
 <rect x="${box.x}" y="${box.y}" width="${box.width}" height="${box.height}" rx="14" fill="${p.tile}"/>
 ${text(box.x + padding, labelY, label, fittedLabel, p.secondary, 500)}
 ${text(box.x + padding, valueY, value, size, p.text, 600)}
@@ -190,6 +203,7 @@ ${heroes.map((field, index) => heroField(field, index ? 682 : 80, heroWidth, exp
 ${heroes.length > 1 ? `<line x1="640" y1="${expanded ? 220 : 174}" x2="640" y2="${expanded ? 510 : 316}" stroke="${p.divider}"/>` : ''}
 ${metrics.length ? `<line x1="80" y1="344" x2="1200" y2="344" stroke="${p.divider}"/>` : ''}
 ${metrics.map((field, index) => tile(field, layout[index], heroLimit, p)).join('')}
+${metrics.find(f => f.key === 'monthEstimateCharge')?.note ? text(80, 674, metrics.find(f => f.key === 'monthEstimateCharge')!.note!, 16, p.secondary) : ''}
 </svg>`;
 }
 export function renderCompactCard(data: CardData): string { return renderCard(data); }

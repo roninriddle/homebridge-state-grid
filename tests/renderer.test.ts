@@ -64,7 +64,7 @@ describe('卡片 SVG', () => {
   it('默认展示全部 8 个字段标签', () => {
     const svg = renderDetailCard(base);
     expect(svg).toContain('账户余额');
-    expect(svg).toContain('本月预估电费');
+    expect(svg).toContain('当月累计电费估算');
     expect(svg).toContain('当月用电');
     expect(svg).toContain('用电 · 10月27日');
     expect(svg).toContain('上月用电');
@@ -94,8 +94,8 @@ describe('卡片 SVG', () => {
     expect(svg).toContain('上月用电');
     expect(svg).toContain('上月电费');
     expect(svg).not.toContain('2026年9月');
-    expect(svg).toContain('本月预估电费');
-    expect(svg).not.toContain('预估电费 · 估算');
+    expect(svg).toContain('当月累计电费估算');
+    expect(svg).not.toContain('累计电费估算 · 估算');
   });
 
   it('1～17 个下方指标每行铺满，边界不溢出、占位不重叠', () => {

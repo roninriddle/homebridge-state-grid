@@ -39,6 +39,7 @@ const { normalizeCardSettings } = loadDist('services/card-settings.js');
 const { PluginUpdates } = loadDist('services/plugin-updates.js');
 const { WidgetSettings } = loadDist('services/widgets.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
+const { formatDate } = loadDist('sgcc/payloads.js');
 const {
   FIELD_KEYS,
   FIELD_META,
@@ -268,7 +269,10 @@ class UiGateway {
     if (!cache || !Array.isArray(cache.accounts)) {
       return { ok: true, updatedAt: null, accounts: [] };
     }
-    return { ok: true, updatedAt: cache.updatedAt, accounts: cache.accounts };
+    return { ok: true, updatedAt: cache.updatedAt, accounts: cache.accounts.map(account => {
+      const data = cachedSnapshot(account.data ?? account.snapshot);
+      return {...account, snapshot: data ? summarizeSnapshot(data) : account.snapshot};
+    }) };
   }
 
   /** 读缓存里的单户号预览图（纯本地，不联网）。 */
@@ -429,10 +433,13 @@ class UiGateway {
     if (payload.consNo && !account) return { ok: false, message: '户号不在缓存中' };
     const snapshot = cachedSnapshot(account?.data ?? account?.snapshot);
     const source = snapshot ? 'cache' : 'sample';
+    const demoDay = formatDate(new Date(Date.now() - 86400000));
+    const demoMonth = demoDay.slice(0, 7);
+    const demoBillMonth = formatDate(new Date(new Date(demoMonth + '-01T00:00:00+08:00').getTime() - 86400000)).slice(0, 7);
     const data = snapshot || {
       consNo: '', name: '模拟数据', balance: 123.45, latestDailyUsage: 6.28,
-      latestDailyDate: '2026-10-27', currentMonthUsage: 187.4,
-      latestMonth: '2026-09', latestMonthUsage: 302.1, latestMonthCharge: 158.9,
+      latestDailyDate: demoDay, currentMonth: demoMonth, currentMonthThrough: demoDay, currentMonthPartial: false, currentMonthUsage: 187.4,
+      latestMonth: demoBillMonth, latestMonthUsage: 302.1, latestMonthCharge: 158.9,
       currentYearUsage: 2311.3, currentYearCharge: 1210.4, latestPeakUsage: 2.1,
       latestValleyUsage: 3.2, latestFlatUsage: 0.98, latestSharpUsage: 0,
       monthPeakUsage: 60, monthValleyUsage: 100, monthFlatUsage: 27.4,

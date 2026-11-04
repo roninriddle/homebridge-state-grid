@@ -78,7 +78,7 @@ describe('业务数据边界', () => {
     expect(c.queryDailyUsage).toHaveBeenCalledWith(account, '2026-10-01', '2026-10-29');
   });
   it('零用电估算是零；缺失值仍然未知', () => {
-    expect(estimateCharge({latestMonthCharge: 50, latestMonthUsage: 100, currentMonthUsage: 0} as any)).toBe(0);
+    expect(estimateCharge({latestMonth: '2026-09', currentMonthThrough:'2026-10-28',currentMonthPartial:false,latestMonthCharge: 50, latestMonthUsage: 100, currentMonthUsage: 0} as any)).toBe(0);
     expect(estimateCharge({latestMonthCharge: 50, latestMonthUsage: 0, currentMonthUsage: 1} as any)).toBeUndefined();
   });
   it('明确预付费类型的零余额不变成后付费', async () => {
