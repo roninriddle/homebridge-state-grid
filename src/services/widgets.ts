@@ -7,6 +7,7 @@ import { fieldValues, formatField } from '../renderer/card-svg.js';
 import { normalizeFieldOrder } from '../renderer/fields.js';
 import { resolveAppearance, type AppearanceConfig } from './appearance.js';
 import { cachedSnapshot, snapshotToCard } from './card.js';
+import { usagePeriod } from './billing-estimate.js';
 import { PluginStore, atomicWrite } from './store.js';
 
 export const WIDGET_PORT = 19861;
@@ -67,15 +68,16 @@ export function widgetPayload(storagePath: string, now = Date.now()) {
     const look = resolveAppearance(account.consNo, account.address, appearance[account.consNo], config);
     const snapshot = cachedSnapshot(account.data ?? account.snapshot);
     // 无真实快照时给出缺失值，不伪造演示数据。
-    const card = snapshotToCard(snapshot || {updatedAt: 0, dailySeries: []} as any, {title: look.name, fields});
+    const card = snapshotToCard(snapshot || {updatedAt: 0, dailySeries: []} as any, {title: look.name, fields}, now);
     const metrics = fieldValues(card).map(field => ({key: field.key, label: field.label,
       value: typeof field.value === 'number' && Number.isFinite(field.value) ? field.value : null,
-      text: formatField(field), unit: field.unit, estimated: field.estimated === true}));
+      text: formatField(field), unit: field.unit, estimated: field.estimated === true, ...(field.note ? {note: field.note} : {}), ...(field.period ? {period: field.period} : {}), ...(field.through ? {through: field.through} : {})}));
     const updatedAt = snapshot?.updatedAt || null;
-    const stale = !updatedAt || now - updatedAt > 26 * 3600000 || !!account.lastError || state === 'needs_verification' || state === 'error';
+    const period = snapshot ? usagePeriod(snapshot, now) : null;
+    const stale = !!period?.month && !period.current || !updatedAt || now - updatedAt > 26 * 3600000 || !!account.lastError || state === 'needs_verification' || state === 'error';
     return {id: createHmac('sha256', settings.identityKey || '').update(account.consNo).digest('hex').slice(0, 24),
       title: look.name, region: look.region || null, theme: config.theme === 'dark' ? 'dark' : 'light', updatedAt,
-      stale, status: !updatedAt ? '暂无用电数据' : stale ? '数据未更新 · 显示缓存' : '已同步', metrics};
+      stale, dataMonth: period?.month || null, status: !updatedAt ? '暂无用电数据' : stale ? '数据未更新 · 显示缓存' : '已同步', metrics};
   });
   return {schemaVersion: 1, generatedAt: now, refreshAfterSeconds: 3600, accounts};
 }

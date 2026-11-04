@@ -591,7 +591,7 @@ export class StateGridClient {
       if (!(error instanceof StateGridApiError || error instanceof StateGridNetworkError)) throw error;
     }
 
-    const sorted = readings.filter((item) => item.usage !== undefined);
+    const sorted = [...new Map(readings.filter((item) => item.usage !== undefined && item.date <= todayKey).map(item => [item.date, item])).values()].sort((a,b) => a.date.localeCompare(b.date));
     const latest = sorted[sorted.length - 1];
     const monthReadings = sorted.filter((item) => item.date.startsWith(monthKey));
 
@@ -619,9 +619,10 @@ export class StateGridClient {
       name: account.name || account.consNoSrc,
       latestDailyUsage: latest?.usage,
       latestDailyDate: latest?.date,
+      currentMonth: monthKey,
       currentMonthUsage: readings.total ?? sum(monthReadings.map((item) => item.usage)),
       currentMonthThrough: monthReadings[monthReadings.length - 1]?.date,
-      currentMonthPartial: readings.total === undefined && (!monthReadings.length || Number(monthReadings[monthReadings.length - 1].date.slice(-2)) !== monthReadings.length),
+      currentMonthPartial: readings.total === undefined && (!monthReadings.length || monthReadings.some((item,index) => item.date !== `${monthKey}-${String(index+1).padStart(2,'0')}`)),
       latestMonth: lastSettled?.month,
       latestMonthUsage: lastSettled?.usage,
       latestMonthCharge: lastSettled?.charge,

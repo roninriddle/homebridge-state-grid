@@ -38,6 +38,7 @@ import { assembleProfile } from './services/device-profile.js';
 import { PluginUpdates } from './services/plugin-updates.js';
 import { WidgetServer } from './services/widgets.js';
 import { formatClock } from './renderer/format.js';
+import { formatDate } from './sgcc/payloads.js';
 import {
   estimateCharge,
   maskConsNo,
@@ -79,6 +80,7 @@ interface CameraEntry {
   /** ffmpeg 的循环输入帧（PNG），视频流用它。 */
   png?: Buffer;
   snapshot?: AccountSnapshot;
+  paintedMonth?: string;
   lastSuccess?: number;
   lastError?: string;
   cameraError?: (id: string) => void;
@@ -302,6 +304,10 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       try { this.store.applyCardConfig(); } catch (error) { this.log.warn(`卡片设置应用失败：${(error as Error).message}`); }
       void this.reconcileAppearance().catch((error) => this.log.warn(`名称更新失败：${(error as Error).message}`));
       this.reconcileFields();
+      const month = formatDate(new Date()).slice(0, 7);
+      for (const entry of this.entries.values()) if (entry.snapshot && entry.paintedMonth !== month) {
+        void this.paint(entry).catch(error => this.log.warn(`跨月卡片更新失败：${(error as Error).message}`));
+      }
       void this.reconcileVisibility();
     }, 8_000);
     this.configWatcher.unref?.();
@@ -569,6 +575,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
   /** 把快照渲染成 PNG（给 ffmpeg）与 JPEG（给 HomeKit）。 */
   private async paint(entry: CameraEntry): Promise<void> {
     if (!entry.snapshot) return;
+    const renderedMonth = formatDate(new Date()).slice(0, 7);
     const stale = entry.snapshot.updatedAt < Date.now() - STALE_AFTER_MS;
     const card = snapshotToCard(entry.snapshot, {
       title: entry.title, region: entry.region, fields: this.fields, theme: this.theme,
@@ -577,6 +584,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     try {
       const png = renderPng(renderCard(card), { width: this.width });
       entry.png = png;
+      entry.paintedMonth = renderedMonth;
       atomicWrite(join(this.store.frameDir(), `${entry.consNo}.png`), png);
       entry.jpeg = await pngToJpeg(png, { width: this.width, quality: 88 });
       // 落盘预览缓存：设置页读它渲染缩略图，避免每次打开都联网拉数据。
@@ -661,7 +669,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
       // HomeKit 快照：优先给缓存好的 JPEG，没有就现渲染一张。
       snapshot: async () => {
         const current = this.entries.get(entry.consNo);
-        if (current?.snapshot && (current.lastError || current.snapshot.updatedAt < Date.now() - STALE_AFTER_MS)) await this.paint(current);
+        if (current?.snapshot && (current.lastError || current.paintedMonth !== formatDate(new Date()).slice(0, 7) || current.snapshot.updatedAt < Date.now() - STALE_AFTER_MS)) await this.paint(current);
         if (current?.jpeg) return current.jpeg;
         if (current?.png) {
           const png = current.png;

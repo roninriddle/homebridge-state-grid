@@ -8,30 +8,23 @@
 
 import type { AccountSnapshot } from '../sgcc/types.js';
 
-/**
- * 本月电费估算：用最近结算月的**实际均价**反推，而不是硬编码阶梯电价。
- *
- * 这样能自动适配地区差异，误差比固定电价小得多，但仍然只是估算——
- * 卡片上必须带"估算"字样。
- */
-export function estimateCharge(snapshot: AccountSnapshot): number | undefined {
-  const { latestMonthCharge, latestMonthUsage, currentMonthUsage } = snapshot;
-  if (latestMonthCharge === undefined || latestMonthUsage === undefined || currentMonthUsage === undefined || latestMonthUsage <= 0) return undefined;
-  const unitPrice = latestMonthCharge / latestMonthUsage;
-  if (!Number.isFinite(unitPrice) || unitPrice < 0) return undefined;
-  return Math.round(currentMonthUsage * unitPrice * 100) / 100;
-}
+import { chargeEstimate, usagePeriod } from './billing-estimate.js';
+export { estimateCharge } from './billing-estimate.js';
 
 /**
  * 把 AccountSnapshot 扁平化成可落盘、可展示的摘要。
  * 缺字段统一转 `null`（不补 0），`dailySeries` 只存条数，不把整条序列塞进缓存。
  */
 export function summarizeSnapshot(snapshot: AccountSnapshot): Record<string, unknown> {
+  const estimate = chargeEstimate(snapshot);
+  const period = usagePeriod(snapshot);
   return {
     consNo: snapshot.consNo,
     latestDailyUsage: snapshot.latestDailyUsage ?? null,
     latestDailyDate: snapshot.latestDailyDate ?? null,
     currentMonthUsage: snapshot.currentMonthUsage ?? null,
+    currentMonth: period.month ?? null,
+    currentMonthLabel: `${period.prefix}用电`,
     currentMonthThrough: snapshot.currentMonthThrough ?? null,
     currentMonthPartial: snapshot.currentMonthPartial ?? null,
     latestMonth: snapshot.latestMonth ?? null,
@@ -52,7 +45,8 @@ export function summarizeSnapshot(snapshot: AccountSnapshot): Record<string, unk
     ladderLevel: snapshot.ladderLevel ?? null,
     penalty: snapshot.penalty ?? null,
     historyOwe: snapshot.historyOwe ?? null,
-    estimate: estimateCharge(snapshot) ?? null,
+    estimate: estimate.value ?? null,
+    estimateInfo: estimate,
     updatedAt: snapshot.updatedAt,
     seriesDays: snapshot.dailySeries?.length ?? 0,
   };
