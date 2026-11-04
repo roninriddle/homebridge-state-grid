@@ -77,6 +77,7 @@ export function widgetPayload(storagePath: string, now = Date.now()) {
     const stale = !!period?.month && !period.current || !updatedAt || now - updatedAt > 26 * 3600000 || !!account.lastError || state === 'needs_verification' || state === 'error';
     return {id: createHmac('sha256', settings.identityKey || '').update(account.consNo).digest('hex').slice(0, 24),
       title: look.name, region: look.region || null, theme: config.theme === 'dark' ? 'dark' : 'light', updatedAt,
+      statistics:card.statistics, trendEnabled:fields.includes('monthlyTrend'),
       stale, dataMonth: period?.month || null, status: !updatedAt ? '暂无用电数据' : stale ? '数据未更新 · 显示缓存' : '已同步', metrics};
   });
   return {schemaVersion: 1, generatedAt: now, refreshAfterSeconds: 3600, accounts};

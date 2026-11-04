@@ -127,7 +127,7 @@ describe('卡片 SVG', () => {
       const heroes = sizes.filter((match) => match[1] === 'hero').map((match) => Number(match[2]));
       const metrics = sizes.filter((match) => match[1] === 'metric').map((match) => Number(match[2]));
       expect(heroes).toHaveLength(Math.min(count, 2));
-      expect(metrics).toHaveLength(Math.max(count - 2, 0));
+      expect(metrics).toHaveLength(Math.max(keys.slice(0,count).filter(key=>key!=='monthlyTrend').length - 2, 0));
       for (const size of metrics) expect(size).toBeLessThan(Math.min(...heroes));
     }
   });

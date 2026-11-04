@@ -110,6 +110,9 @@
       }
       .tip.warn { background: transparent; border-color: var(--warn); color: var(--warn); }
       .tip.err { background: transparent; border-color: var(--err); color: var(--err); }
+      #tab-statistics .metrics {grid-template-columns:repeat(auto-fit,minmax(230px,1fr));}
+      #statisticsChart {overflow-x:auto;}
+      #statisticsChart svg {display:block;width:100%;min-width:840px;}
       .hidden { display: none !important; }
 
       .acct { border: 1px solid var(--line); background: var(--panel); border-radius: 14px; padding: 18px; margin: 14px 0; }
@@ -184,9 +187,19 @@
         <button class="tab active" id="tabBtnLogin" onclick="switchTab('login')">连接与登录</button>
         <button class="tab" id="tabBtnAccounts" onclick="switchTab('accounts')">户号与卡片预览</button>
         <button class="tab" id="tabBtnFields" onclick="switchTab('fields')">卡片指标</button>
+        <button class="tab" id="tabBtnStatistics" onclick="switchTab('statistics')">用电统计</button>
         <button class="tab" id="tabBtnWidgets" onclick="switchTab('widgets')">iOS 小组件</button>
       </nav>
 
+      <div id="tab-statistics" class="hidden">
+        <section class="panel"><h2>用电统计与同比</h2><p class="hint">结算月同比比较同一个月份；同期累计严格比较相同月份范围，本月同日区间严格比较相同截止日。缺少数据或去年基期为零时不输出百分比。</p>
+          <label for="statisticsAccount">用电卡片</label><select id="statisticsAccount"></select><div class="actions"><button id="statisticsReload">读取最新缓存</button><span class="meta" id="statisticsUpdated"></span></div><div class="tip hidden" id="statisticsTip"></div>
+          <h3>最近结算月</h3><div id="statisticsMonthly" class="metrics"></div>
+          <h3>同月份累计电量</h3><div id="statisticsCumulative" class="metrics"></div>
+          <h3>同日区间电量</h3><div id="statisticsMonthToDate" class="metrics"></div>
+        </section>
+        <section class="panel"><h2>近12个结算月趋势</h2><label for="statisticsMode">展示指标</label><select id="statisticsMode"><option value="usage">用电量（kWh）</option><option value="charge">结算电费（元）</option></select><div id="statisticsChart" style="margin-top:16px"></div><p class="hint">空缺月份保留为“—”，不补零。图表来自结算账单，不含当月未结算的累计用电。家庭卡片可在「卡片指标」中加入同比指标与趋势图，大号 iOS 小组件支持趋势图。</p></section>
+      </div>
       <div id="tab-widgets" class="hidden">
         <section class="panel">
           <h2>iOS 桌面小组件</h2>
@@ -563,6 +576,30 @@
         }
       }
 
+      let statisticsCharts = null;
+      function percent(value) {return value == null ? '—' : (value > 0 ? '+' : '') + Number(value).toFixed(2) + '<small>%</small>';}
+      function statisticsPair(label, comparison, note, unit) {
+        return metric(label, percent(comparison.percent), (note || '') + (comparison.reason ? ' · '+comparison.reason : '') + ' · 本期 '+(comparison.current ?? '—')+' / 上年同期 '+(comparison.previous ?? '—')+' '+unit);
+      }
+      async function loadStatistics() {
+        try {
+          const response=await bridge.request('/statistics-cache',{consNo:$('statisticsAccount').value||undefined});if(!response.ok)throw new Error(response.message);
+          const selector=$('statisticsAccount');const selection=response.selected;selector.replaceChildren();
+          for(const a of response.accounts){const option=document.createElement('option');option.value=a.consNo;option.textContent=a.title+' · '+a.masked;selector.appendChild(option);}selector.value=selection;
+          const s=response.statistics,m=s.monthly,c=s.cumulative,d=s.monthToDate;
+          $('statisticsMonthly').innerHTML=statisticsPair('结算月电量同比',m.usage,(m.month||'—')+' / '+(m.previousMonth||'—'),'kWh')+statisticsPair('结算月电费同比',m.charge,(m.month||'—')+' / '+(m.previousMonth||'—'),'元');
+          const years=(c.year||'—')+' / '+(c.previousYear||'—')+' 年1—'+(c.throughMonth||'—')+'月';
+          $('statisticsCumulative').innerHTML=metric('今年同期累计',fmt(c.current,'kWh',2),years)+metric('去年同期累计',fmt(c.previous,'kWh',2),years)+metric('累计电量同比',percent(c.percent),c.reason||years);
+          $('statisticsMonthToDate').innerHTML=statisticsPair('同日区间电量同比',d,(d.start||'—')+' 至 '+(d.through||'—')+'；去年 '+(d.previousStart||'—')+' 至 '+(d.previousThrough||'—'),'kWh');
+          $('statisticsUpdated').textContent=response.updatedAt?'数据更新 '+new Date(response.updatedAt).toLocaleString('zh-CN',{hour12:false}):'尚无查询数据';
+          statisticsCharts={usage:response.usageChart,charge:response.chargeChart};$('statisticsChart').innerHTML=statisticsCharts[$('statisticsMode').value||'usage'];
+          showTip('statisticsTip',s.historyUnavailable?'历史数据本次未完全更新，保留已有历史缓存。':!s.hasHistory?'暂无历史账单，完成登录后的下次数据刷新会自动查询。':'');
+        }catch(error){showTip('statisticsTip',error.message||'读取统计失败','err');}
+      }
+      $('statisticsAccount').addEventListener('change',loadStatistics);
+      $('statisticsReload').addEventListener('click',()=>withBusy($('statisticsReload'),loadStatistics));
+      $('statisticsMode').addEventListener('change',()=>{if(statisticsCharts)$('statisticsChart').innerHTML=statisticsCharts[$('statisticsMode').value];});
+
       let widgetHasToken = false;
       let widgetScriptReady = null;
       let widgetScriptUrl = '';
@@ -681,6 +718,9 @@
       }));
 
       function switchTab(tab) {
+        $('tab-statistics').classList.toggle('hidden', tab !== 'statistics');
+        $('tabBtnStatistics').classList.toggle('active', tab === 'statistics');
+        if(tab==='statistics')void loadStatistics();
         const isLogin = tab === 'login';
         $('tab-widgets').classList.toggle('hidden', tab !== 'widgets');
         $('tabBtnWidgets').classList.toggle('active', tab === 'widgets');

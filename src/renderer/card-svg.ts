@@ -1,3 +1,5 @@
+import type { BillingStatistics } from '../services/billing-statistics.js';
+import { renderMonthlyTrend } from './monthly-trend.js';
 import type { ChargeEstimate } from '../services/billing-estimate.js';
 /**
  * 用电卡片的 SVG 生成。
@@ -42,6 +44,7 @@ export interface CardData {
   latestMonth?: string;
   currentMonthPrefix?: string;
   chargeEstimate?: ChargeEstimate;
+  statistics?: BillingStatistics;
   /** 截至数据日期的累计电费折算，使用最近结算月均价。 */
   monthEstimateCharge?: number;
   latestMonthUsage?: number;
@@ -91,6 +94,7 @@ function labelFor(field: FieldValue): string {
 }
 export function fieldValues(data: CardData): FieldValue[] {
   const order = data.fields?.length ? data.fields : DEFAULT_FIELD_ORDER;
+  const stats=data.statistics;
   const values: Record<FieldKey, number | undefined> = {
     balance: data.primaryValue, monthEstimateCharge: data.monthEstimateCharge,
     currentMonthUsage: data.currentMonthUsage, latestDailyUsage: data.latestDailyUsage,
@@ -101,8 +105,11 @@ export function fieldValues(data: CardData): FieldValue[] {
     monthPeakUsage: data.monthPeakUsage, monthValleyUsage: data.monthValleyUsage,
     monthFlatUsage: data.monthFlatUsage, monthSharpUsage: data.monthSharpUsage,
     ladderLevel: data.ladderLevel, penalty: data.penalty, historyOwe: data.historyOwe,
+    latestMonthUsageYoY:stats?.monthly.usage.percent,latestMonthChargeYoY:stats?.monthly.charge.percent,
+    samePeriodCurrentYearUsage:stats?.cumulative.current,samePeriodLastYearUsage:stats?.cumulative.previous,samePeriodYearUsageYoY:stats?.cumulative.percent,
+    lastYearMonthToDateUsage:stats?.monthToDate.previous,monthToDateUsageYoY:stats?.monthToDate.percent,monthlyTrend:undefined,
   };
-  return order.map((key) => {
+  return order.filter(key=>key!=='monthlyTrend').map((key) => {
     const meta = FIELD_META[key];
     let label = key === 'balance' ? data.primaryLabel || meta.label : meta.label;
     if (key === 'latestDailyUsage' && data.latestDailyDate) label = `用电 · ${formatDayMonth(data.latestDailyDate)}`;
@@ -112,29 +119,34 @@ export function fieldValues(data: CardData): FieldValue[] {
     if (key === 'currentMonthUsage') label = `${prefix}${data.currentMonthPartial ? '已取电量 · 部分' : '用电'}`;
     if (['monthPeakUsage','monthValleyUsage','monthFlatUsage','monthSharpUsage'].includes(key)) label = meta.label.replace('当月', prefix);
     if (key === 'ladderLevel') label = '最近账单阶梯';
-    return {key, label, value: values[key], unit: meta.unit, estimated: meta.estimated,
+    const comparisonNote=key==='latestMonthUsageYoY'||key==='latestMonthChargeYoY'?`${stats?.monthly.month||'—'} / ${stats?.monthly.previousMonth||'—'}`:
+      key.startsWith('samePeriod')?`${stats?.cumulative.year||'—'} / ${stats?.cumulative.previousYear||'—'} 年1—${stats?.cumulative.throughMonth||'—'}月`:
+      key==='monthToDateUsageYoY'||key==='lastYearMonthToDateUsage'?`${stats?.monthToDate.through||'—'} / ${stats?.monthToDate.previousThrough||'—'}`:undefined;
+    const comparisonReason=key==='latestMonthUsageYoY'?stats?.monthly.usage.reason:key==='latestMonthChargeYoY'?stats?.monthly.charge.reason:key.startsWith('samePeriod')?stats?.cumulative.reason:key==='monthToDateUsageYoY'||key==='lastYearMonthToDateUsage'?stats?.monthToDate.reason:undefined;
+    return {key, label, ...(comparisonNote?{note:(comparisonReason?comparisonReason+' · ':'')+comparisonNote}:{}), value: values[key], unit: meta.unit, estimated: meta.estimated,
       ...(key === 'monthEstimateCharge' ? {note: data.chargeEstimate?.note, period: data.chargeEstimate?.month, through: data.chargeEstimate?.through} : {}),
       ...(key === 'currentMonthUsage' ? {period: data.chargeEstimate?.month, through: data.currentMonthThrough} : {})};
   });
 }
 export function formatField(field: FieldValue): string {
+  if(field.unit==='%') return field.value===undefined||!Number.isFinite(field.value)?'—':(field.value>0?'+':'')+field.value.toFixed(2);
   return field.unit === '元' ? formatMoney(field.value) : field.unit === '档' ? formatNumber(field.value, 0) : formatUsage(field.value);
 }
 
 export interface MetricLayout { x: number; y: number; width: number; height: number; valueSize: number; }
 /** 最后一行也铺满可用宽度，删去指标后不保留空槽。 */
-export function metricLayout(count: number): MetricLayout[] {
+export function metricLayout(count: number, availableHeight=280): MetricLayout[] {
   if (count <= 0) return [];
-  const columns = count <= 3 ? count : count === 4 ? 2 : count <= 6 ? 3 : count <= 8 ? 4 : count === 9 ? 3 : 4;
+  const columns = availableHeight<280&&count>12?6:count <= 3 ? count : count === 4 ? 2 : count <= 6 ? 3 : count <= 8 ? 4 : count === 9 ? 3 : 4;
   const rows = Math.ceil(count / columns);
-  const gap = 14;
-  const height = (280 - gap * (rows - 1)) / rows;
+  const gap = availableHeight<280?10:14;
+  const height = (availableHeight - gap * (rows - 1)) / rows;
   const valueSize = rows === 1 ? (count === 1 ? 88 : count === 2 ? 84 : 76) : rows === 2 ? (columns === 2 ? 66 : columns === 3 ? 62 : 56) : rows === 3 ? (columns === 3 ? 50 : 46) : rows === 4 ? 34 : 25;
   return Array.from({length: count}, (_, index) => {
     const row = Math.floor(index / columns);
     const inRow = Math.min(columns, count - row * columns);
     const width = (1120 - gap * (inRow - 1)) / inRow;
-    return {x: 80 + (index % columns) * (width + gap), y: 368 + row * (height + gap), width, height, valueSize};
+    return {x: 80 + (index % columns) * (width + gap), y: 368 + row * (height + gap), width, height, valueSize:Math.min(valueSize,height*.48)};
   });
 }
 function heroSize(field: FieldValue, width: number, expanded: boolean): number {
@@ -180,14 +192,21 @@ export function renderCard(data: CardData): string {
   const fields = fieldValues(data);
   const heroes = fields.slice(0, 2);
   const metrics = fields.slice(2);
-  const expanded = !metrics.length;
+  const showTrend=data.fields?.includes('monthlyTrend')===true;
+  const expanded = !metrics.length&&!showTrend;
   const heroWidth = heroes.length === 1 ? 1120 : 518;
   const heroLimit = Math.min(...heroes.map((field) => heroSize(field, heroWidth, expanded)));
   const status = data.staleNote || `更新 ${formatClock(data.updatedAt)}`;
   const statusWidth = Math.min(476, 46 + [...status].reduce((sum, ch) => sum + (/[^\x00-\xff]/.test(ch) ? 20 : 12), 0));
   const statusX = 1200 - statusWidth;
   const titleSize = Math.min(34, 520 / Math.max(1, Array.from(data.title).length));
-  const layout = metricLayout(metrics.length);
+  const layout = metricLayout(metrics.length,showTrend?156:280);
+  const notes:string[]=[];
+  const estimateTile=metrics.find(f=>f.key==='monthEstimateCharge');if(estimateTile?.note)notes.push(estimateTile.note);
+  if(fields.some(f=>['latestMonthUsageYoY','latestMonthChargeYoY'].includes(f.key)))notes.push(data.statistics?.monthly.month?`结算同比 ${data.statistics.monthly.month} / ${data.statistics.monthly.previousMonth}`:'结算同比数据待更新');
+  if(fields.some(f=>f.key.startsWith('samePeriod')))notes.push(data.statistics?.cumulative.throughMonth?`累计 ${data.statistics.cumulative.year}/${data.statistics.cumulative.previousYear}年1—${data.statistics.cumulative.throughMonth}月`:'同期累计数据待更新');
+  if(fields.some(f=>['monthToDateUsageYoY','lastYearMonthToDateUsage'].includes(f.key)))notes.push(data.statistics?.monthToDate.through?`同日截至 ${data.statistics.monthToDate.through} / ${data.statistics.monthToDate.previousThrough}`:'同日区间数据待更新');
+  const footer=notes.join(' · '),footerSize=Math.min(15,1120/Math.max(1,[...footer].reduce((sum,c)=>sum+(/[^\x00-\x7f]/.test(c)?1:.55),0)));
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720">
 <rect width="1280" height="720" fill="${p.bg}"/>
 <rect x="32" y="28" width="1216" height="664" rx="36" fill="${p.card}" stroke="${p.stroke}"/>
@@ -203,7 +222,8 @@ ${heroes.map((field, index) => heroField(field, index ? 682 : 80, heroWidth, exp
 ${heroes.length > 1 ? `<line x1="640" y1="${expanded ? 220 : 174}" x2="640" y2="${expanded ? 510 : 316}" stroke="${p.divider}"/>` : ''}
 ${metrics.length ? `<line x1="80" y1="344" x2="1200" y2="344" stroke="${p.divider}"/>` : ''}
 ${metrics.map((field, index) => tile(field, layout[index], heroLimit, p)).join('')}
-${metrics.find(f => f.key === 'monthEstimateCharge')?.note ? text(80, 674, metrics.find(f => f.key === 'monthEstimateCharge')!.note!, 16, p.secondary) : ''}
+${showTrend?renderMonthlyTrend(data.statistics?.trend||[],{x:80,y:fields.length?548:160,width:1120,height:fields.length?112:510,theme:data.theme}):''}
+${footer?text(80,674,footer,footerSize,p.secondary):''}
 </svg>`;
 }
 export function renderCompactCard(data: CardData): string { return renderCard(data); }

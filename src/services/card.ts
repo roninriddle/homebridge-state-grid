@@ -2,6 +2,7 @@
 import type { AccountSnapshot } from '../sgcc/types.js';
 import type { CardData } from '../renderer/card-svg.js';
 import type { FieldKey } from '../renderer/fields.js';
+import { billingStatistics } from './billing-statistics.js';
 import { chargeEstimate, usagePeriod } from './billing-estimate.js';
 
 export function snapshotToCard(snapshot: AccountSnapshot, options: {title: string; region?: string; theme?: 'light' | 'dark'; fields?: FieldKey[]; staleNote?: string}, now = Date.now()): CardData {
@@ -14,6 +15,7 @@ export function snapshotToCard(snapshot: AccountSnapshot, options: {title: strin
     primaryLabel: snapshot.balance !== undefined ? '账户余额' : '应交电费',
     monthEstimateCharge: estimate.value,
     chargeEstimate: estimate,
+    statistics: billingStatistics(snapshot, now),
     currentMonthPrefix: period.prefix,
     staleNote: options.staleNote || (period.month && !period.current ? `数据未更新 · ${period.prefix}缓存` : undefined),
     dailySeries: snapshot.dailySeries ?? [],
