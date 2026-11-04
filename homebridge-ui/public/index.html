@@ -193,12 +193,14 @@
           <p class="hint">安装 Scriptable 后即可显示用电卡片。只读取本机缓存，沿用已保存的卡片名称、指标和配色，不会触发国网登录。</p>
           <label class="switch"><input type="checkbox" id="widgetEnabled" /><span>启用小组件只读接口</span></label>
           <label for="widgetPort">小组件端口</label><input id="widgetPort" type="number" min="1024" max="65535" value="19861" />
-          <div class="actions"><button class="primary" id="widgetSave">应用小组件设置</button><button id="widgetRotate">生成 / 重置令牌</button><button id="widgetRevoke">撤销令牌</button></div>
+          <div class="actions"><button class="primary" id="widgetSave">应用小组件设置</button><button id="widgetRotate" disabled>生成令牌</button><button id="widgetRevoke">撤销令牌</button></div>
+          <div class="tip hidden" id="widgetResetConfirm"><p>重置后原令牌立即失效，已配置的手机需要重新填写。</p><div class="actions"><button id="widgetResetYes">确认重置令牌</button><button id="widgetResetCancel">取消</button></div></div>
           <p class="preview-note" id="widgetStatus"></p><div class="tip hidden" id="widgetTip" aria-live="polite"></div>
-          <div id="widgetSecret" class="hidden"><label for="widgetToken">本次生成的令牌（仅显示这一次，请复制到手机）</label><input id="widgetToken" readonly autocomplete="off" /><p class="hint">重置后，原令牌立即失效，已配置的手机需要重新填写。</p></div>
+          <div id="widgetSecret" class="hidden"><label for="widgetToken">本次生成的令牌（仅显示这一次，请复制到手机）</label><input id="widgetToken" readonly autocomplete="off" spellcheck="false" /><button id="widgetCopyToken">复制令牌</button><p class="hint">重置后，原令牌立即失效，已配置的手机需要重新填写。</p></div>
           <ol class="steps"><li>启用接口并应用设置，生成令牌。</li><li>在 iPhone 安装 Scriptable，下载下方脚本，存入 Scriptable 后运行。也可以新建脚本并粘贴脚本内容。</li><li>填写下方服务器地址和令牌，选择户号，保存档案。多个手机可以使用同一令牌。</li><li>在 iPhone 桌面添加 Scriptable 小组件，选择“国家电网”脚本。Parameter 留空使用“默认”，或填写其他档案名。</li></ol>
           <label for="widgetAddress">服务器地址（手机必须能访问这台主机）</label><input id="widgetAddress" readonly />
-          <div class="actions"><a href="widgets/国家电网.js" download="国家电网.js">下载 Scriptable 脚本</a><button id="widgetCopyScript">复制脚本内容</button></div>
+          <div class="actions"><a id="widgetDownload" href="widgets/国家电网.js" download="国家电网.js">下载 Scriptable 脚本</a><button id="widgetCopyScript" disabled>复制脚本内容</button><button id="widgetShowScript">查看 / 手动复制脚本</button></div>
+          <div id="widgetScriptPanel" class="hidden"><label for="widgetScript">Scriptable 完整脚本（可全选复制）</label><textarea id="widgetScript" readonly spellcheck="false" rows="10" style="width:100%;box-sizing:border-box;font-family:monospace;white-space:pre;resize:vertical"></textarea><button id="widgetSelectScript">全选脚本</button><p class="hint">若自动复制受限，电脑按 Ctrl+C / ⌘C；手机长按所选文字后点“拷贝”。将完整内容粘贴到 Scriptable 新建脚本中。</p></div>
           <p class="hint">支持小 / 中 / 大尺寸，分别显示前 2 / 4 / 8 个指标，顶部两个始终最大。iOS 决定实际刷新时间；无法连接时显示手机缓存及其更新时间。外出使用 VPN；HTTP 接口用于可信局域网，勿直接映射到公网。令牌仅能读取已启用户号的用电指标。</p>
         </section>
       </div>
@@ -529,7 +531,7 @@
           return await task();
         } finally {
           button.disabled = false;
-          button.textContent = label;
+          if (button.textContent === '请稍候…') button.textContent = label;
         }
       }
 
@@ -561,7 +563,13 @@
         }
       }
 
+      let widgetHasToken = false;
+      let widgetScriptReady = null;
+      let widgetScriptUrl = '';
       function renderWidgets(status) {
+        widgetHasToken = status.hasToken === true;
+        $('widgetRotate').disabled = false;
+        $('widgetRotate').textContent = widgetHasToken ? '重置令牌' : '生成令牌';
         $('widgetEnabled').checked = status.enabled; $('widgetPort').value = status.port;
         const host = window.location.hostname;
         $('widgetAddress').value = 'http://' + host + ':' + status.port;
@@ -569,26 +577,67 @@
         if (status.error) showTip('widgetTip', status.error, 'err');
       }
       async function loadWidgets() {
-        try {const status = await bridge.request('/widgets'); if (!status.ok) throw new Error(status.message); renderWidgets(status);}
+        try {const status = await bridge.request('/widgets'); if (!status.ok) throw new Error(status.message); renderWidgets(status); void loadWidgetScript().catch(error => showTip('widgetTip', error.message || '脚本读取失败，请重试', 'err'));}
         catch (error) {showTip('widgetTip', error.message || '读取小组件设置失败', 'err');}
       }
       $('widgetSave').addEventListener('click', () => withBusy($('widgetSave'), async () => {
         try {const status = await bridge.request('/widgets-setting', {enabled:$('widgetEnabled').checked, port:Number($('widgetPort').value)}); if (!status.ok) throw new Error(status.message); showTip('widgetTip', '小组件设置已应用，主进程将在几秒内更新。'); renderWidgets(status); setTimeout(loadWidgets, 2500);}
         catch (error) {showTip('widgetTip', error.message || '保存失败', 'err');}
       }));
+      async function generateWidgetToken() {
+        try {
+          const status = await bridge.request('/widgets-token'); if (!status.ok) throw new Error(status.message);
+          renderWidgets(status); $('widgetResetConfirm').classList.add('hidden');
+          $('widgetToken').value = status.token; $('widgetSecret').classList.remove('hidden');
+          showTip('widgetTip', '令牌已生成，仅本次显示。请点击“复制令牌”保存到手机。' + (!status.enabled ? '接口尚未启用，请勾选并应用小组件设置。' : ''));
+        } catch (error) {showTip('widgetTip', error.message || '生成失败，请重试', 'err');}
+      }
       $('widgetRotate').addEventListener('click', () => withBusy($('widgetRotate'), async () => {
-        if (!confirm('生成新令牌后，原令牌立即失效，已配置的手机需要重新填写。继续？')) return;
-        try {const status = await bridge.request('/widgets-token'); if (!status.ok) throw new Error(status.message); renderWidgets(status); $('widgetToken').value = status.token; $('widgetSecret').classList.remove('hidden'); showTip('widgetTip', '请复制令牌。关闭设置页后无法再次查看。');}
-        catch (error) {showTip('widgetTip', error.message || '生成失败', 'err');}
+        if (widgetHasToken) { $('widgetResetConfirm').classList.remove('hidden'); return; }
+        await generateWidgetToken();
       }));
+      $('widgetResetYes').addEventListener('click', () => withBusy($('widgetResetYes'), generateWidgetToken));
+      $('widgetResetCancel').addEventListener('click', () => $('widgetResetConfirm').classList.add('hidden'));
       $('widgetRevoke').addEventListener('click', () => withBusy($('widgetRevoke'), async () => {
-        try {const status = await bridge.request('/widgets-revoke'); if (!status.ok) throw new Error(status.message); $('widgetToken').value = ''; $('widgetSecret').classList.add('hidden'); renderWidgets(status); showTip('widgetTip', '令牌已撤销，手机将无法继续读取新数据。');}
+        try {const status = await bridge.request('/widgets-revoke'); if (!status.ok) throw new Error(status.message); $('widgetToken').value = ''; $('widgetSecret').classList.add('hidden'); $('widgetResetConfirm').classList.add('hidden'); renderWidgets(status); showTip('widgetTip', '令牌已撤销，手机将无法继续读取新数据。');}
         catch (error) {showTip('widgetTip', error.message || '撤销失败', 'err');}
       }));
-      $('widgetCopyScript').addEventListener('click', () => withBusy($('widgetCopyScript'), async () => {
-        try {const response = await fetch('widgets/国家电网.js'); if (!response.ok) throw new Error('下载失败'); await navigator.clipboard.writeText(await response.text()); showTip('widgetTip', '脚本已复制，可粘贴到 Scriptable。');}
-        catch {showTip('widgetTip', '无法自动复制，请使用“下载 Scriptable 脚本”。', 'warn');}
+      function selectWidgetText(field) {field.focus(); field.select(); field.setSelectionRange(0, field.value.length);}
+      async function copyWidgetText(field, name) {
+        if (!field.value) {showTip('widgetTip', name + '尚未准备好，请稍后重试。', 'warn'); return;}
+        selectWidgetText(field);
+        let copied = false;
+        // 在用户点击时同步复制，兼容 HTTP 和宿主 iframe；不放宽浏览器权限。
+        try {copied = document.execCommand('copy') === true;} catch { /* 尝试现代接口 */ }
+        if (!copied && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+          try {await navigator.clipboard.writeText(field.value); copied = true;} catch { /* 保留手动选择 */ }
+        }
+        showTip('widgetTip', copied ? name + '已复制。' : name + '已选中。电脑按 Ctrl+C / ⌘C；手机长按后点“拷贝”。', copied ? '' : 'warn');
+      }
+      $('widgetCopyToken').addEventListener('click', () => copyWidgetText($('widgetToken'), '令牌'));
+      function loadWidgetScript() {
+        if (widgetScriptReady) return widgetScriptReady;
+        widgetScriptReady = bridge.request('/widgets-script').then(result => {
+          if (!result.ok || typeof result.script !== 'string' || !result.script) throw new Error(result.message || '脚本读取失败，请重新打开本页');
+          // 只给文本框赋值，不把脚本当作网页代码执行或改变换行。
+          $('widgetScript').value = result.script; $('widgetCopyScript').disabled = false;
+          if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+            if (widgetScriptUrl) URL.revokeObjectURL(widgetScriptUrl);
+            widgetScriptUrl = URL.createObjectURL(new Blob([result.script], {type:'text/javascript;charset=utf-8'}));
+            $('widgetDownload').href = widgetScriptUrl;
+          }
+        }).catch(error => {widgetScriptReady = null; throw error;});
+        return widgetScriptReady;
+      }
+      $('widgetCopyScript').addEventListener('click', () => {
+        $('widgetScriptPanel').classList.remove('hidden');
+        return copyWidgetText($('widgetScript'), '脚本');
+      });
+      $('widgetShowScript').addEventListener('click', () => withBusy($('widgetShowScript'), async () => {
+        try {await loadWidgetScript(); $('widgetScriptPanel').classList.remove('hidden'); selectWidgetText($('widgetScript'));}
+        catch (error) {showTip('widgetTip', error.message || '脚本读取失败，请重试', 'err');}
       }));
+      $('widgetSelectScript').addEventListener('click', () => selectWidgetText($('widgetScript')));
 
       let offeredVersion = '';
       function renderUpdates(status) {

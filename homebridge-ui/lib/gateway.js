@@ -82,6 +82,10 @@ class UiGateway {
     this.pending = null;
   }
 
+  widgetScript() {
+    return {ok: true, script: fs.readFileSync(path.join(__dirname, '../public/widgets/国家电网.js'), 'utf8')};
+  }
+
   // ---------------------------------------------------------------- 会话
 
   /**

@@ -33,8 +33,8 @@
 从 0.9.0 起，可将用电数据放在 iPhone 桌面。手机安装 [Scriptable](https://scriptable.app/)，无需独立开发者签名。
 
 1. 打开插件设置 → **iOS 小组件**，勾选启用接口，默认端口 `19861`，点击 **应用小组件设置**；主进程几秒内生效，关闭设置页仍可读取。
-2. 点击 **生成 / 重置令牌**，复制本次显示的令牌。令牌只显示一次，服务器仅保存哈希；再次生成会使旧令牌立即失效。
-3. 下载页面中的 **国家电网.js**，保存到 Scriptable 并运行。也可新建脚本并粘贴页面复制的脚本内容。脚本源文件在 [homebridge-ui/public/widgets/国家电网.js](homebridge-ui/public/widgets/国家电网.js)。
+2. 点击 **生成令牌**，再点 **复制令牌**。已有令牌时通过 **重置令牌 → 确认重置令牌** 重新生成。令牌只显示一次，服务器仅保存哈希；再次生成会使旧令牌立即失效。
+3. 下载页面中的 **国家电网.js**，保存到 Scriptable 并运行。也可点击 **复制脚本内容**，新建脚本并粘贴；自动复制受限时使用 **查看 / 手动复制脚本 → 全选脚本**，电脑按 Ctrl+C / ⌘C，手机长按选择“拷贝”。脚本源文件在 [homebridge-ui/public/widgets/国家电网.js](homebridge-ui/public/widgets/国家电网.js)。
 4. 选择 **新增或重新配置**，填写档案名（例如“默认”）、服务器地址（例如 `http://Homebridge主机IP:19861`）和令牌，再选择户号。令牌保存在手机钥匙串，脚本中不嵌入凭据。
 5. 在 iPhone 桌面添加 Scriptable 小组件，选择“国家电网”脚本。Parameter 留空读取“默认”档案；多个服务器/户号可分别建立档案，并在不同小组件的 Parameter 中填写对应档案名。
 
@@ -67,7 +67,7 @@
 ## 安装
 
 ```bash
-npm install -g https://github.com/roninriddle/homebridge-state-grid/releases/download/v0.9.0/homebridge-state-grid-0.9.0.tgz
+npm install -g https://github.com/roninriddle/homebridge-state-grid/releases/download/v0.9.1/homebridge-state-grid-0.9.1.tgz
 ```
 
 当前正式包通过本项目 GitHub Release 分发。安装 0.8.0 后，可在插件设置页自动检查后续版本并选择安装。
