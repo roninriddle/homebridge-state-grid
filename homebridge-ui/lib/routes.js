@@ -92,6 +92,7 @@ function registerRoutes(server, gateway) {
   server.onRequest('/preview-draft', safe(async (payload) => gateway.previewDraft(payload)));
   server.onRequest('/card-draft', safe(async (payload) => gateway.cardDraft(payload)));
   server.onRequest('/card-apply', safe(async () => gateway.applyCardConfig()));
+  server.onRequest('/widgets-script', safe(async () => gateway.widgetScript()));
   server.onRequest('/widgets', safe(async () => gateway.widgets.status()));
   server.onRequest('/widgets-setting', safe(async payload => gateway.widgets.configure(payload.enabled, payload.port)));
   server.onRequest('/widgets-token', safe(async () => gateway.widgets.rotateToken()));
