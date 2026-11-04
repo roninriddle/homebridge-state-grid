@@ -20,6 +20,17 @@ function page(options:{copy?:boolean;modernCopy?:boolean;scriptFailure?:boolean}
  return {gateway,request,element,run,click,copy,modern,confirm,blob};
 }
 describe('Homebridge 沙盒中的小组件设置',()=>{
+ it('选择、排序、保存独立模块；切换页面和令牌操作保留草稿，重新读取保留顺序',async()=>{
+  const p=page();await p.run('loadWidgets()');
+  p.run("widgetFields=['latestMonthCharge','balance'];addWidgetField('monthlyTrend');moveWidgetField(1,-1);");
+  await p.run('loadWidgets()');await p.click('widgetRotate');
+  expect(p.run('JSON.stringify(widgetFields)')).toBe('["balance","latestMonthCharge","monthlyTrend"]');
+  expect(p.element('widgetDraftState').textContent).toContain('未保存');
+  await p.click('widgetSave');expect(p.gateway.widgets.status().fields).toEqual(['balance','latestMonthCharge','monthlyTrend']);
+  expect(p.element('widgetDraftState').textContent).toContain('已保存');
+  expect(p.gateway.currentFields()).not.toEqual(p.gateway.widgets.status().fields);
+  p.run('widgetFields=["balance"];removeWidgetField(0);');expect(p.run('JSON.stringify(widgetFields)')).toBe('["balance"]');
+ });
  it('禁止系统弹窗时仍可首次生成，已有令牌须页内确认；取消不重置，撤销后清空文本',async()=>{
   const p=page();await p.run('loadWidgets()');await p.click('widgetRotate');
   const first=p.element('widgetToken').value;expect(first).toHaveLength(43);expect(p.element('widgetRotate').textContent).toBe('重置令牌');expect(p.confirm).not.toHaveBeenCalled();expect(p.gateway.widgets.status().hasToken).toBe(true);

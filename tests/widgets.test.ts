@@ -57,6 +57,31 @@ describe('小组件缓存和隐私',()=>{
     f.store.saveAccountsCache({updatedAt:Date.now(),accounts:[{consNo:'empty',name:'',address:'',title:'国家电网',enabled:true}]} as any);
     const a=widgetPayload(f.dir).accounts[0];expect(a.updatedAt).toBeNull();expect(a.metrics.every(m=>m.value===null&&m.text==='—')).toBe(true);
   });
+  it('独立保存模块顺序及趋势开关，重建设置后仍生效；家庭卡片互不影响',()=>{
+    const f=fixture(),cardFields=f.store.loadFields();
+    f.settings.configure(true,19861,['latestMonthCharge','balance','monthlyTrend']);
+    f.store.saveFields(['currentYearUsage']);
+    const p=widgetPayload(f.dir).accounts[0];
+    expect(p.metrics.map(m=>m.key)).toEqual(['latestMonthCharge','balance']);expect(p.trendEnabled).toBe(true);
+    expect(new WidgetSettings(f.dir).status().fields).toEqual(['latestMonthCharge','balance','monthlyTrend']);
+    f.settings.configure(true,19861,['balance']);expect(widgetPayload(f.dir).accounts[0].trendEnabled).toBe(false);
+    expect(f.store.loadFields()).toEqual(['currentYearUsage']);expect(cardFields).not.toEqual(['currentYearUsage']);
+    for(const fields of [[],['invalid'],null])expect(()=>f.settings.configure(true,19861,fields)).toThrow('模块');
+    expect(f.settings.status().fields).toEqual(['balance']);
+  });
+  it('原生配置在底部保存后应用一次，保留已有令牌；无效手工配置不会覆盖有效设置',()=>{
+    const f=fixture();f.settings.configure(true,19861);const {token}=f.settings.rotateToken();
+    const old=JSON.parse(readFileSync(join(f.settings.directory,'settings.json'),'utf8'));
+    const draft=f.settings.draft({enabled:true,port:19862,fields:['monthlyTrend','latestMonthUsageYoY']});
+    expect(f.settings.status().port).toBe(19861);
+    writeFileSync(join(f.dir,'config.json'),JSON.stringify({platforms:[{platform:'StateGrid',widgetSettings:draft.settings}]}));
+    const fresh=new WidgetSettings(f.dir);expect(fresh.status()).toMatchObject({port:19862,fields:['monthlyTrend','latestMonthUsageYoY']});
+    expect(fresh.authorized('Bearer '+token)).toBe(true);
+    expect(JSON.parse(readFileSync(join(f.settings.directory,'settings.json'),'utf8'))).toMatchObject({identityKey:old.identityKey,tokenHash:old.tokenHash,tokenCreatedAt:old.tokenCreatedAt});
+    fresh.configure(true,19863,['balance']);expect(fresh.status()).toMatchObject({port:19863,fields:['balance']});
+    writeFileSync(join(f.dir,'config.json'),JSON.stringify({platforms:[{platform:'StateGrid',widgetSettings:{...draft.settings,fields:[]}}]}));
+    expect(fresh.status().fields).toEqual(['balance']);
+  });
 });
 
 describe('小组件真实 HTTP 生命周期',()=>{
@@ -69,6 +94,8 @@ describe('小组件真实 HTTP 生命周期',()=>{
     const results=await Promise.all(Array.from({length:20},()=>fetch(f.url,{headers:authorization(f.token)})));
     expect(results.every(r=>r.status===200&&r.headers.get('cache-control')==='no-store')).toBe(true);
     expect((await results[0].json()).accounts).toHaveLength(1);
+    f.settings.configure(true,f.port,['latestMonthCharge','balance']);
+    expect((await(await fetch(f.url,{headers:authorization(f.token)})).json()).accounts[0].metrics.map((m:any)=>m.key)).toEqual(['latestMonthCharge','balance']);
     f.store.setAccountVisibility('1234567890123',false);
     expect((await(await fetch(f.url,{headers:authorization(f.token)})).json()).accounts).toEqual([]);
     f.settings.revokeToken();expect((await fetch(f.url,{headers:authorization(f.token)})).status).toBe(401);

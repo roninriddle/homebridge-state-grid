@@ -4,17 +4,25 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import { fieldValues, formatField } from '../renderer/card-svg.js';
-import { normalizeFieldOrder } from '../renderer/fields.js';
+import { DEFAULT_FIELD_ORDER, FIELD_KEYS, FIELD_META, normalizeFieldOrder, type FieldKey } from '../renderer/fields.js';
 import { resolveAppearance, type AppearanceConfig } from './appearance.js';
 import { cachedSnapshot, snapshotToCard } from './card.js';
 import { usagePeriod } from './billing-estimate.js';
 import { PluginStore, atomicWrite } from './store.js';
 
 export const WIDGET_PORT = 19861;
-interface Settings { enabled: boolean; port: number; tokenHash?: string; identityKey?: string; tokenCreatedAt?: number; }
+interface Settings { enabled: boolean; port: number; fields?: FieldKey[]; appliedRevision?: string; tokenHash?: string; identityKey?: string; tokenCreatedAt?: number; }
 interface DisplayConfig extends AppearanceConfig { platform?: string; theme?: 'light' | 'dark'; fields?: unknown; accounts?: Array<{consNo?: string; title?: string; showRegion?: boolean; enabled?: boolean}>; }
 function read<T>(file: string, fallback: T): T {try {return JSON.parse(readFileSync(file, 'utf8'));} catch {return fallback;}}
 const digest = (token: string) => createHash('sha256').update(token).digest();
+
+/** 原生底部保存与页内保存使用同一份经过校验的配置；不含令牌。 */
+export function normalizeWidgetSettings(input: {enabled: boolean; port: number; fields: unknown}) {
+  if (typeof input?.enabled !== 'boolean' || !Number.isInteger(input.port) || input.port < 1024 || input.port > 65535) throw new Error('请填写 1024～65535 之间的端口');
+  if (!Array.isArray(input.fields) || !input.fields.length || input.fields.some(key => !(FIELD_KEYS as readonly unknown[]).includes(key))) throw new Error('请至少选择一个有效的小组件模块');
+  const settings = {enabled: input.enabled, port: input.port, fields: normalizeFieldOrder(input.fields)};
+  return {...settings, revision: createHash('sha256').update(JSON.stringify(settings)).digest('hex')};
+}
 
 export class WidgetSettings {
   readonly directory: string;
@@ -23,8 +31,26 @@ export class WidgetSettings {
     mkdirSync(this.directory, {recursive: true, mode: 0o700});
   }
   read(): Settings {
-    const value = read<Partial<Settings>>(join(this.directory, 'settings.json'), {});
+    let value = read<Partial<Settings>>(join(this.directory, 'settings.json'), {});
+    const config = read<{platforms?: Array<{platform?: string; widgetSettings?: any}>}>(join(this.storagePath, 'config.json'), {}).platforms?.find(p => p.platform === 'StateGrid')?.widgetSettings;
+    if (config) {
+      try {
+        const {revision, ...settings} = normalizeWidgetSettings(config);
+        if (value.appliedRevision !== revision) {
+          value = {...value, ...settings, appliedRevision: revision};
+          this.write(value as Settings);
+        }
+      } catch { /* 无效的手工配置不覆盖既有设置或令牌。 */ }
+    }
     return {...value, enabled: value.enabled === true, port: Number.isInteger(value.port) && value.port! >= 1024 && value.port! <= 65535 ? value.port! : WIDGET_PORT};
+  }
+  fields(): FieldKey[] {
+    const settings = this.read();
+    if (settings.fields?.length) return normalizeFieldOrder(settings.fields);
+    // 首次独立设置前保留升级前的显示内容，保存后不再跟随家庭卡片。
+    const store = new PluginStore(this.storagePath); store.applyCardConfig();
+    const config = read<{platforms?: DisplayConfig[]}>(join(this.storagePath, 'config.json'), {}).platforms?.find(p => p.platform === 'StateGrid');
+    return normalizeFieldOrder(store.loadFields() || config?.fields);
   }
   private write(value: Settings): void {atomicWrite(join(this.directory, 'settings.json'), JSON.stringify(value, null, 2) + '\n');}
   status() {
@@ -32,14 +58,16 @@ export class WidgetSettings {
     const runtime = read<{pid?: number; port?: number; listening?: boolean; error?: string}>(join(this.directory, 'runtime.json'), {});
     let alive = false;
     if (runtime.pid) {try {process.kill(runtime.pid, 0); alive = true;} catch { /* stopped */ }}
-    return {ok: true, enabled: settings.enabled, port: settings.port, hasToken: !!settings.tokenHash, tokenCreatedAt: settings.tokenCreatedAt || null,
+    return {ok: true, enabled: settings.enabled, port: settings.port, fields: this.fields(),
+      catalog: FIELD_KEYS.map(key => ({key, ...FIELD_META[key]})), defaults: [...DEFAULT_FIELD_ORDER], hasToken: !!settings.tokenHash, tokenCreatedAt: settings.tokenCreatedAt || null,
       listening: settings.enabled && alive && runtime.listening === true && runtime.port === settings.port,
       error: settings.enabled && alive ? runtime.error || null : null};
   }
-  configure(enabled: boolean, port: number) {
-    if (typeof enabled !== 'boolean' || !Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('请填写 1024～65535 之间的端口');
-    this.write({...this.read(), enabled, port}); return this.status();
+  configure(enabled: boolean, port: number, fields: unknown = this.fields()) {
+    const {revision: _, ...settings} = normalizeWidgetSettings({enabled, port, fields});
+    this.write({...this.read(), ...settings}); return this.status();
   }
+  draft(input: {enabled: boolean; port: number; fields: unknown}) {return {ok: true, settings: normalizeWidgetSettings(input)};}
   rotateToken() {
     const token = randomBytes(32).toString('base64url'); const current = this.read();
     this.write({...current, tokenHash: digest(token).toString('hex'), identityKey: current.identityKey || randomBytes(32).toString('hex'), tokenCreatedAt: Date.now()});
@@ -59,7 +87,7 @@ export function widgetPayload(storagePath: string, now = Date.now()) {
   const store = new PluginStore(storagePath);
   const config = read<{platforms?: DisplayConfig[]}>(join(storagePath, 'config.json'), {}).platforms?.find(p => p.platform === 'StateGrid') || {};
   const visibility = store.loadVisibility(), appearance = store.loadAppearance();
-  const fields = normalizeFieldOrder(store.loadFields() || config.fields);
+  const fields = new WidgetSettings(storagePath).fields();
   const state = store.loadRuntimeStatus()?.state;
   const accounts = (store.loadAccountsCache()?.accounts || []).filter(account => {
     const configured = config.accounts?.find(a => a.consNo === account.consNo);
