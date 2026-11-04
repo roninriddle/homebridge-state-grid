@@ -184,8 +184,24 @@
         <button class="tab active" id="tabBtnLogin" onclick="switchTab('login')">连接与登录</button>
         <button class="tab" id="tabBtnAccounts" onclick="switchTab('accounts')">户号与卡片预览</button>
         <button class="tab" id="tabBtnFields" onclick="switchTab('fields')">卡片指标</button>
+        <button class="tab" id="tabBtnWidgets" onclick="switchTab('widgets')">iOS 小组件</button>
       </nav>
 
+      <div id="tab-widgets" class="hidden">
+        <section class="panel">
+          <h2>iOS 桌面小组件</h2>
+          <p class="hint">安装 Scriptable 后即可显示用电卡片。只读取本机缓存，沿用已保存的卡片名称、指标和配色，不会触发国网登录。</p>
+          <label class="switch"><input type="checkbox" id="widgetEnabled" /><span>启用小组件只读接口</span></label>
+          <label for="widgetPort">小组件端口</label><input id="widgetPort" type="number" min="1024" max="65535" value="19861" />
+          <div class="actions"><button class="primary" id="widgetSave">应用小组件设置</button><button id="widgetRotate">生成 / 重置令牌</button><button id="widgetRevoke">撤销令牌</button></div>
+          <p class="preview-note" id="widgetStatus"></p><div class="tip hidden" id="widgetTip" aria-live="polite"></div>
+          <div id="widgetSecret" class="hidden"><label for="widgetToken">本次生成的令牌（仅显示这一次，请复制到手机）</label><input id="widgetToken" readonly autocomplete="off" /><p class="hint">重置后，原令牌立即失效，已配置的手机需要重新填写。</p></div>
+          <ol class="steps"><li>启用接口并应用设置，生成令牌。</li><li>在 iPhone 安装 Scriptable，下载下方脚本，存入 Scriptable 后运行。也可以新建脚本并粘贴脚本内容。</li><li>填写下方服务器地址和令牌，选择户号，保存档案。多个手机可以使用同一令牌。</li><li>在 iPhone 桌面添加 Scriptable 小组件，选择“国家电网”脚本。Parameter 留空使用“默认”，或填写其他档案名。</li></ol>
+          <label for="widgetAddress">服务器地址（手机必须能访问这台主机）</label><input id="widgetAddress" readonly />
+          <div class="actions"><a href="widgets/国家电网.js" download="国家电网.js">下载 Scriptable 脚本</a><button id="widgetCopyScript">复制脚本内容</button></div>
+          <p class="hint">支持小 / 中 / 大尺寸，分别显示前 2 / 4 / 8 个指标，顶部两个始终最大。iOS 决定实际刷新时间；无法连接时显示手机缓存及其更新时间。外出使用 VPN；HTTP 接口用于可信局域网，勿直接映射到公网。令牌仅能读取已启用户号的用电指标。</p>
+        </section>
+      </div>
       <!-- Tab 1：连接与登录 -->
       <div id="tab-login">
         <section class="panel">
@@ -545,6 +561,35 @@
         }
       }
 
+      function renderWidgets(status) {
+        $('widgetEnabled').checked = status.enabled; $('widgetPort').value = status.port;
+        const host = window.location.hostname;
+        $('widgetAddress').value = 'http://' + host + ':' + status.port;
+        $('widgetStatus').textContent = !status.enabled ? '接口已关闭' : status.listening ? '接口已启动 · ' + (status.hasToken ? '令牌已配置' : '请生成令牌') : '等待主进程应用设置（约 2 秒）；如未启动请重启国家电网子网桥';
+        if (status.error) showTip('widgetTip', status.error, 'err');
+      }
+      async function loadWidgets() {
+        try {const status = await bridge.request('/widgets'); if (!status.ok) throw new Error(status.message); renderWidgets(status);}
+        catch (error) {showTip('widgetTip', error.message || '读取小组件设置失败', 'err');}
+      }
+      $('widgetSave').addEventListener('click', () => withBusy($('widgetSave'), async () => {
+        try {const status = await bridge.request('/widgets-setting', {enabled:$('widgetEnabled').checked, port:Number($('widgetPort').value)}); if (!status.ok) throw new Error(status.message); showTip('widgetTip', '小组件设置已应用，主进程将在几秒内更新。'); renderWidgets(status); setTimeout(loadWidgets, 2500);}
+        catch (error) {showTip('widgetTip', error.message || '保存失败', 'err');}
+      }));
+      $('widgetRotate').addEventListener('click', () => withBusy($('widgetRotate'), async () => {
+        if (!confirm('生成新令牌后，原令牌立即失效，已配置的手机需要重新填写。继续？')) return;
+        try {const status = await bridge.request('/widgets-token'); if (!status.ok) throw new Error(status.message); renderWidgets(status); $('widgetToken').value = status.token; $('widgetSecret').classList.remove('hidden'); showTip('widgetTip', '请复制令牌。关闭设置页后无法再次查看。');}
+        catch (error) {showTip('widgetTip', error.message || '生成失败', 'err');}
+      }));
+      $('widgetRevoke').addEventListener('click', () => withBusy($('widgetRevoke'), async () => {
+        try {const status = await bridge.request('/widgets-revoke'); if (!status.ok) throw new Error(status.message); $('widgetToken').value = ''; $('widgetSecret').classList.add('hidden'); renderWidgets(status); showTip('widgetTip', '令牌已撤销，手机将无法继续读取新数据。');}
+        catch (error) {showTip('widgetTip', error.message || '撤销失败', 'err');}
+      }));
+      $('widgetCopyScript').addEventListener('click', () => withBusy($('widgetCopyScript'), async () => {
+        try {const response = await fetch('widgets/国家电网.js'); if (!response.ok) throw new Error('下载失败'); await navigator.clipboard.writeText(await response.text()); showTip('widgetTip', '脚本已复制，可粘贴到 Scriptable。');}
+        catch {showTip('widgetTip', '无法自动复制，请使用“下载 Scriptable 脚本”。', 'warn');}
+      }));
+
       let offeredVersion = '';
       function renderUpdates(status) {
         $('updateVersion').textContent = '已安装 ' + status.installedVersion;
@@ -588,6 +633,9 @@
 
       function switchTab(tab) {
         const isLogin = tab === 'login';
+        $('tab-widgets').classList.toggle('hidden', tab !== 'widgets');
+        $('tabBtnWidgets').classList.toggle('active', tab === 'widgets');
+        if (tab === 'widgets') void loadWidgets();
         const isAccounts = tab === 'accounts';
         const isFields = tab === 'fields';
         $('tab-login').classList.toggle('hidden', !isLogin);
