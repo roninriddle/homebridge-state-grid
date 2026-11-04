@@ -28,6 +28,7 @@ describe('累计电费估算口径',()=>{
  it('按北京时间跨月，跨年旧缓存标明年份；更新时间不能冒充截至日期',()=>{
   const old={...base,currentMonth:'2026-12',currentMonthThrough:'2026-12-30',latestMonth:'2026-11',updatedAt:Date.parse('2026-12-31T22:00:00+08:00')};
   expect(chargeEstimate(old,Date.parse('2026-12-31T16:00:00Z')).label).toBe('2026年12月累计电费估算');
+  expect(chargeEstimate({...base,currentMonth:undefined,currentMonthThrough:undefined,updatedAt:1e100},NOW).value).toBeUndefined();
   const missing=chargeEstimate({...base,currentMonth:undefined,currentMonthThrough:undefined},NOW);expect(missing.value).toBeUndefined();expect(missing.note).toContain('缺少电量截至日期');
  });
  it('缺日或覆盖未确认时暂停估算，真实零仍为零',()=>{

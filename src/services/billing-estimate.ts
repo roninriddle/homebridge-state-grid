@@ -26,7 +26,7 @@ export function usagePeriod(snapshot: AccountSnapshot, now = Date.now()) {
   const today = formatDate(new Date(now));
   const through = day(snapshot.currentMonthThrough) ? snapshot.currentMonthThrough : undefined;
   // 老缓存没有显式月份，优先使用电量截至日期；更新时间仅用于识别月份，不冒充数据截至日。
-  const sampledMonth = Number.isFinite(snapshot.updatedAt) && snapshot.updatedAt > 0 ? formatDate(new Date(snapshot.updatedAt)).slice(0, 7) : undefined;
+  const sampledMonth = Number.isFinite(snapshot.updatedAt) && snapshot.updatedAt > 0 && Number.isFinite(new Date(snapshot.updatedAt).getTime()) ? formatDate(new Date(snapshot.updatedAt)).slice(0, 7) : undefined;
   const period = month(snapshot.currentMonth) ? snapshot.currentMonth : through?.slice(0, 7) || sampledMonth;
   const current = period === today.slice(0, 7);
   const prefix = period ? current ? '当月' : monthName(period, now) : '月份未知';
