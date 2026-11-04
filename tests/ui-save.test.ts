@@ -36,6 +36,8 @@ function ui(hook = async (_path: string, _payload: any) => {}) {
       await hook(path, payload);
       if (path === '/card-draft') return gateway.cardDraft(payload);
       if (path === '/card-apply') return gateway.applyCardConfig();
+      if (path === '/widgets') return gateway.widgets.status();
+      if (path === '/widgets-draft') return gateway.widgets.draft(payload);
       return {ok: true};
     }),
   };
@@ -98,6 +100,32 @@ describe('原生保存与卡片保存统一', () => {
   it('新增同比指标和趋势图可随原生底部保存落盘',async()=>{
     const page=ui();page.run("addField('latestMonthUsageYoY'); addField('monthlyTrend');");await page.bottomSave();
     expect(new UiGateway(page.dir).fields().active).toEqual(['balance','currentMonthUsage','latestMonthUsageYoY','monthlyTrend']);
+  });
+  it('底部保存同时提交独立小组件模块、开关、端口，不覆盖家庭卡片或令牌',async()=>{
+    const page=ui();const token=page.gateway.widgets.rotateToken().token;
+    await page.run('loadWidgets()');
+    page.run("widgetFields=['latestMonthUsageYoY','balance','monthlyTrend'];$('widgetEnabled').checked=true;$('widgetPort').value='19862';widgetEdited();");
+    await page.ready();expect(page.gateway.widgets.status().enabled).toBe(false);
+    await page.bottomSave();
+    expect(new UiGateway(page.dir).widgets.status()).toMatchObject({enabled:true,port:19862,fields:['latestMonthUsageYoY','balance','monthlyTrend']});
+    expect(page.gateway.widgets.authorized('Bearer '+token)).toBe(true);
+    expect(page.gateway.currentFields()).toEqual(['balance','currentMonthUsage']);
+    await page.run('loadWidgets()');expect(page.element('widgetDraftState').textContent).toBe('小组件设置已保存');
+  });
+  it('页内应用按钮使用原生保存；保存失败保留草稿并可重试',async()=>{
+    const page=ui();await page.run('loadWidgets()');page.run("widgetFields=['latestDailyUsage'];widgetEdited();");
+    page.bridge.savePluginConfig.mockRejectedValueOnce(new Error('连接中断'));
+    await page.element('widgetSave').listeners.get('click')();expect(page.element('widgetTip').textContent).toBe('连接中断');
+    expect(page.gateway.widgets.status().fields).toEqual(['balance','currentMonthUsage']);
+    await page.element('widgetSave').listeners.get('click')();expect(page.gateway.widgets.status().fields).toEqual(['latestDailyUsage']);
+    expect(page.gateway.currentFields()).toEqual(['balance','currentMonthUsage']);
+  });
+  it('只打开小组件页面也可用底部保存，无效端口修正后可恢复',async()=>{
+    const page=ui();page.run('fieldsLoaded=false;');await page.run('loadWidgets()');
+    page.run("widgetFields=['balance'];$('widgetPort').value='0';widgetEdited();");await expect(page.ready()).rejects.toThrow('端口');
+    page.run("$('widgetPort').value='19861';widgetEdited();");await page.bottomSave();
+    expect(page.gateway.widgets.status().fields).toEqual(['balance']);
+    expect(JSON.parse(readFileSync(page.configFile,'utf8')).platforms[1].cardSettings).toBeUndefined();
   });
 
   it('快速连续编辑只把最新草稿送入底部保存模型', async () => {

@@ -95,7 +95,8 @@ function registerRoutes(server, gateway) {
   server.onRequest('/statistics-cache', safe(async payload => gateway.statisticsCache(payload.consNo)));
   server.onRequest('/widgets-script', safe(async () => gateway.widgetScript()));
   server.onRequest('/widgets', safe(async () => gateway.widgets.status()));
-  server.onRequest('/widgets-setting', safe(async payload => gateway.widgets.configure(payload.enabled, payload.port)));
+  server.onRequest('/widgets-setting', safe(async payload => gateway.widgets.configure(payload.enabled, payload.port, payload.fields)));
+  server.onRequest('/widgets-draft', safe(async payload => gateway.widgets.draft(payload)));
   server.onRequest('/widgets-token', safe(async () => gateway.widgets.rotateToken()));
   server.onRequest('/widgets-revoke', safe(async () => gateway.widgets.revokeToken()));
   server.onRequest('/updates', safe(async () => gateway.updates.status()));
