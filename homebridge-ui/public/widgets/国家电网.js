@@ -62,33 +62,35 @@ function text(stack, value, font, color) {
 }
 function time(value) {if (!value) return '尚未更新'; const f = new DateFormatter(); f.dateFormat = 'MM-dd HH:mm'; f.timeZone = 'Asia/Shanghai'; return f.string(new Date(value));}
 function render(account, note) {
+  const family = config.widgetFamily || 'medium';
   const widget = new ListWidget(); const dark = account && account.theme === 'dark';
   const ink = new Color(dark ? 'f0f5fa' : '14362e'), muted = new Color(dark ? '9bafbb' : '65796f'), accent = new Color(dark ? '61dca6' : '00875b');
-  widget.backgroundColor = new Color(dark ? '10232b' : 'f3faf6'); widget.setPadding(14, 14, 12, 14);
+  widget.backgroundColor = new Color(dark ? '10232b' : 'f3faf6'); widget.setPadding(family==='large'?14:12, 14, family==='large'?12:10, 14);
   widget.url = URLScheme.forRunningScript(); widget.refreshAfterDate = new Date(Date.now() + 3600000);
   if (!account) {text(widget, '国家电网', Font.semiboldSystemFont(16), accent); widget.addSpacer(10); const message = widget.addText(note || '请先在 Scriptable 中运行并配置'); message.font = Font.systemFont(12); message.textColor = muted; widget.addSpacer(); return widget;}
-  const family = config.widgetFamily || 'medium';
   text(widget, account.title || '国家电网', Font.semiboldSystemFont(14), accent);
   if (family === 'large' && account.region) text(widget, account.region, Font.systemFont(10), muted);
-  widget.addSpacer(family === 'large' ? 12 : 6);
+  widget.addSpacer(family === 'large' ? 6 : 4);
   const monthFormatter = new DateFormatter(); monthFormatter.dateFormat = 'yyyy-MM'; monthFormatter.timeZone = 'Asia/Shanghai';
   const monthNow = monthFormatter.string(new Date());
+  const showTrend=family==='large'&&account.trendEnabled&&account.statistics;
+  const richNotes=account.metrics.filter(m=>m.note).length>1||!!account.region;
   const metrics = account.metrics.map(metric => {
     if (!metric.period || metric.period === monthNow) return metric;
     const period = (metric.period.slice(0,4) === monthNow.slice(0,4) ? '' : Number(metric.period.slice(0,4)) + '年') + Number(metric.period.slice(5)) + '月';
     if (metric.key === 'monthEstimateCharge') return {...metric, label: period + '累计电费估算'};
     if (metric.key === 'currentMonthUsage') return {...metric, label: period + (metric.label.includes('部分') ? '已取电量 · 部分' : '用电')};
     return metric;
-  }).slice(0, family === 'small' ? 2 : family === 'large' ? 8 : 4);
+  }).slice(0, family === 'small' ? 2 : family === 'large' ? (showTrend?4:richNotes?6:8) : 4);
   function cell(stack, metric, primary) {
     const column = stack.addStack(); column.layoutVertically();
     if (family !== 'small') column.size = new Size(Math.floor((Device.screenSize().width - 100) / 2), 0);
     text(column, metric.label, Font.systemFont(primary ? 10 : 9), muted);
     column.addSpacer(2);
     const line = column.addStack(); line.bottomAlignContent();
-    text(line, metric.text, primary ? Font.boldSystemFont(family === 'small' ? 25 : 26) : Font.semiboldSystemFont(17), ink);
+    text(line, metric.text, primary ? Font.boldSystemFont(family === 'small' ? 22 : 26) : Font.semiboldSystemFont(16), ink);
     line.addSpacer(3); text(line, metric.unit, Font.systemFont(9), muted);
-    if (metric.note) {column.addSpacer(2); text(column, family === 'large' || !metric.through || metric.text === '—' ? metric.note : '截至 ' + metric.through.slice(5), Font.systemFont(8), muted);}
+    if (metric.note) {column.addSpacer(2); text(column, family === 'large' || !metric.through || metric.text === '—' ? metric.note : '截至 ' + metric.through.slice(5), Font.systemFont(primary?8:7), muted);}
   }
   if (family === 'small') {
     for (let i = 0; i < metrics.length; i++) {cell(widget, metrics[i], true); if (i === 0) widget.addSpacer(4);}
@@ -96,9 +98,20 @@ function render(account, note) {
     for (let i = 0; i < metrics.length; i += 2) {
       const row = widget.addStack(); row.layoutHorizontally(); cell(row, metrics[i], i < 2);
       row.addSpacer(); if (metrics[i + 1]) cell(row, metrics[i + 1], i < 2);
-      if (i + 2 < metrics.length) widget.addSpacer(family === 'large' ? 12 : 6);
+      if (i + 2 < metrics.length) widget.addSpacer(family === 'large' ? 6 : 4);
     }
   }
+  if(showTrend) {
+    widget.addSpacer(8);text(widget,'近12个结算月 · '+account.statistics.trendThrough+'止 · kWh',Font.systemFont(9),muted);
+    const points=account.statistics.trend||[],context=new DrawContext();context.size=new Size(600,125);context.opaque=false;context.respectScreenScale=false;
+    const max=Math.max(1,...points.map(p=>typeof p.usage==='number'&&Number.isFinite(p.usage)&&p.usage>=0?p.usage:0));
+    const slot=600/Math.max(1,points.length);context.setFont(Font.systemFont(12));context.setTextColor(muted);
+    points.forEach((point,i)=>{const known=typeof point.usage==='number'&&Number.isFinite(point.usage)&&point.usage>=0;
+      if(known){const h=Math.max(2,point.usage/max*90);context.setFillColor(accent);context.fillRect(new Rect(i*slot+slot*.2,99-h,slot*.6,h));}
+      const label=known?point.month.slice(5):'—';context.drawTextInRect(label,new Rect(i*slot+slot*.16,105,slot,18));
+    });
+    const picture=widget.addImage(context.getImage());picture.imageSize=new Size(Math.max(200,Device.screenSize().width-100),56);
+  } else if(account.trendEnabled&&!metrics.length) {text(widget,'趋势图请使用大号小组件',Font.systemFont(11),muted);}
   widget.addSpacer();
   text(widget, (note || (account.stale || account.dataMonth && account.dataMonth !== monthNow ? '缓存 · ' : '更新 ')) + time(account.updatedAt), Font.systemFont(9), muted);
   return widget;

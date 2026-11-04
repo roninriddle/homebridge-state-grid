@@ -1,3 +1,5 @@
+import { queryBillingHistory } from './history.js';
+import type { MonthlyBill } from './types.js';
 /**
  * 网上国网 App 网关客户端。
  *
@@ -71,13 +73,7 @@ export interface DailyReading {
   sharp?: number;
 }
 
-export interface MonthlyBill {
-  month: string;
-  usage?: number;
-  charge?: number;
-  /** 阶梯档位（levelStdCode，1/2/3）。 */
-  ladderLevel?: number;
-}
+export type { MonthlyBill } from './types.js';
 
 export interface BalanceInfo {
   consType: string;
@@ -575,7 +571,7 @@ export class StateGridClient {
    * 估算电费**不在这里做**——那是渲染层的职责，并且必须标注"估算"。
    * 这里只返回接口原值，缺失即 undefined。
    */
-  async snapshot(account: PowerAccount, days = 31): Promise<AccountSnapshot> {
+  async snapshot(account: PowerAccount, days = 31, previous?: AccountSnapshot): Promise<AccountSnapshot> {
     const today = new Date();
     const todayKey = formatDate(today);
     const monthKey = todayKey.slice(0, 7);
@@ -597,13 +593,21 @@ export class StateGridClient {
 
     let bills: MonthlyBill[] & { yearUsage?: number; yearCharge?: number } = [];
     let previousBills: MonthlyBill[] = [];
+    let monthlyFailed = false;
     try {
       bills = await this.queryMonthlyBills(account, year);
-      if (!bills.some((bill) => bill.month < monthKey && bill.usage !== undefined)) previousBills = await this.queryMonthlyBills(account, year - 1);
+
     } catch (error) {
       if (error instanceof StateGridError && !(error instanceof StateGridApiError)) throw error;
+      monthlyFailed = true;
     }
-    const settled = [...previousBills, ...bills].filter((bill) => bill.month < monthKey && bill.usage !== undefined);
+    const preliminary: AccountSnapshot = {consNo:account.consNoSrc,name:account.name||'',currentMonth:monthKey,
+      currentMonthUsage:readings.total??monthReadings.reduce((s,r)=>s+(r.usage||0),0),currentMonthThrough:monthReadings.at(-1)?.date,
+      currentMonthPartial:readings.total===undefined&&(!monthReadings.length||monthReadings.some((r,i)=>r.date!==`${monthKey}-${String(i+1).padStart(2,'0')}`)),
+      dailySeries:[],updatedAt:Date.now()};
+    const history = await queryBillingHistory(this,account,bills,preliminary,previous,monthlyFailed);
+    previousBills = (history.monthlyBills||[]).filter(b=>!b.month.startsWith(year+'-'));
+    const settled = [...(history.monthlyBills||[])].filter((bill) => bill.month < monthKey && bill.usage !== undefined);
     const lastSettled = settled[settled.length - 1];
 
     const sum = (values: Array<number | undefined>): number | undefined => {
@@ -615,6 +619,7 @@ export class StateGridClient {
     const ladderBill = [...previousBills, ...bills].reverse().find((bill) => bill.ladderLevel !== undefined);
 
     return {
+      ...history,
       consNo: account.consNoSrc,
       name: account.name || account.consNoSrc,
       latestDailyUsage: latest?.usage,

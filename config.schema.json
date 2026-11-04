@@ -68,7 +68,7 @@
       "fields": {
         "title": "卡片指标",
         "type": "array",
-        "description": "按显示顺序列出卡片指标：第 1 项是主数字，第 2 项与其并列，其余进入下方网格。删除某行 = 不显示该指标；拖拽调整顺序 = 改变位置。",
+        "description": "按显示顺序列出卡片指标：第 1 项是主数字，第 2 项与其并列，其余进入下方网格。删除某行 = 不显示该指标；拖拽调整顺序 = 改变位置。趋势图固定在数字区域下方。",
         "default": [
           { "key": "balance" },
           { "key": "monthEstimateCharge" },
@@ -92,7 +92,7 @@
               "type": "string",
               "oneOf": [
                 { "title": "账户余额 / 应交电费", "enum": ["balance"] },
-                { "title": "本月预估电费", "enum": ["monthEstimateCharge"] },
+                { "title": "当月累计电费估算", "enum": ["monthEstimateCharge"] },
                 { "title": "当月用电", "enum": ["currentMonthUsage"] },
                 { "title": "上日用电", "enum": ["latestDailyUsage"] },
                 { "title": "上日峰用电", "enum": ["latestPeakUsage"] },
@@ -109,7 +109,15 @@
                 { "title": "当月尖用电", "enum": ["monthSharpUsage"] },
                 { "title": "当前阶梯", "enum": ["ladderLevel"] },
                 { "title": "违约金", "enum": ["penalty"] },
-                { "title": "历史欠费", "enum": ["historyOwe"] }
+                { "title": "历史欠费", "enum": ["historyOwe"] },
+                { "title": "结算月电量同比", "enum": ["latestMonthUsageYoY"] },
+                { "title": "结算月电费同比", "enum": ["latestMonthChargeYoY"] },
+                { "title": "今年同期累计电量", "enum": ["samePeriodCurrentYearUsage"] },
+                { "title": "去年同期累计电量", "enum": ["samePeriodLastYearUsage"] },
+                { "title": "同期累计电量同比", "enum": ["samePeriodYearUsageYoY"] },
+                { "title": "去年同日区间电量", "enum": ["lastYearMonthToDateUsage"] },
+                { "title": "同日区间电量同比", "enum": ["monthToDateUsageYoY"] },
+                { "title": "近12个结算月趋势图", "enum": ["monthlyTrend"] }
               ]
             }
           }

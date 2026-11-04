@@ -8,6 +8,7 @@
 
 import type { AccountSnapshot } from '../sgcc/types.js';
 
+import { billingStatistics } from './billing-statistics.js';
 import { chargeEstimate, usagePeriod } from './billing-estimate.js';
 export { estimateCharge } from './billing-estimate.js';
 
@@ -47,6 +48,7 @@ export function summarizeSnapshot(snapshot: AccountSnapshot): Record<string, unk
     historyOwe: snapshot.historyOwe ?? null,
     estimate: estimate.value ?? null,
     estimateInfo: estimate,
+    statistics: billingStatistics(snapshot),
     updatedAt: snapshot.updatedAt,
     seriesDays: snapshot.dailySeries?.length ?? 0,
   };

@@ -514,7 +514,7 @@ export class StateGridPlatform implements DynamicPlatformPlugin {
     for (const account of accounts) {
       const entry = this.entries.get(account.consNoSrc) ?? this.ensureEntry(account);
       try {
-        const snapshot = await this.client.snapshot(account);
+        const snapshot = await this.client.snapshot(account,31,entry.snapshot);
         successes++;
         entry.snapshot = snapshot;
         entry.lastSuccess = Date.now();

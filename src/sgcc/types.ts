@@ -94,6 +94,14 @@ export function powerAccounts(userInfo: Record<string, unknown>): PowerAccount[]
   return result;
 }
 
+export interface MonthlyBill {
+  month: string;
+  usage?: number;
+  charge?: number;
+  ladderLevel?: number;
+}
+export interface LastYearSamePeriod { start:string; end:string; usage?:number; complete:boolean; queriedAt:number; }
+
 /** 单个户号的一次采样结果。字段缺失即保持 undefined，绝不补 0。 */
 export interface AccountSnapshot {
   consNo: string;
@@ -112,6 +120,11 @@ export interface AccountSnapshot {
   latestMonthCharge?: number;
   currentYearUsage?: number;
   currentYearCharge?: number;
+  monthlyBills?: MonthlyBill[];
+  billingHistoryChecks?: Record<string,number>;
+  lastYearSamePeriod?: LastYearSamePeriod;
+  historyUpdatedAt?: number;
+  historyUnavailable?: boolean;
   /** 预付费余额（正数为有余额）。 */
   balance?: number;
   /** 后付费应交金额（正数为欠费）。 */

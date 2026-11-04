@@ -39,6 +39,8 @@ const { normalizeCardSettings } = loadDist('services/card-settings.js');
 const { PluginUpdates } = loadDist('services/plugin-updates.js');
 const { WidgetSettings } = loadDist('services/widgets.js');
 const { snapshotToCard, cachedSnapshot } = loadDist('services/card.js');
+const { billingStatistics } = loadDist('services/billing-statistics.js');
+const { monthlyTrendSvg } = loadDist('renderer/monthly-trend.js');
 const { formatDate } = loadDist('sgcc/payloads.js');
 const {
   FIELD_KEYS,
@@ -275,6 +277,17 @@ class UiGateway {
     }) };
   }
 
+  statisticsCache(consNo) {
+    const accounts=this.store.loadAccountsCache()?.accounts || [];
+    const account=(consNo?accounts.find(a=>a.consNo===consNo):accounts.find(a=>a.enabled)||accounts[0]);
+    if(consNo&&!account)throw new Error('户号不在缓存中');
+    const snapshot=cachedSnapshot(account?.data || account?.snapshot);
+    const statistics=billingStatistics(snapshot || {updatedAt:0,dailySeries:[]});
+    const theme=this.displayConfig().theme;
+    return {ok:true,selected:account?.consNo||'',accounts:accounts.map(a=>({consNo:a.consNo,title:a.title||'国家电网',masked:maskConsNo(a.consNo)})),
+      statistics,updatedAt:snapshot?.updatedAt||null,usageChart:monthlyTrendSvg(statistics.trend,{theme}),chargeChart:monthlyTrendSvg(statistics.trend,{theme,mode:'charge'})};
+  }
+
   /** 读缓存里的单户号预览图（纯本地，不联网）。 */
   cachedPreview(consNo) {
     const account = this.store.loadAccountsCache()?.accounts.find((a) => a.consNo === consNo);
@@ -470,7 +483,8 @@ class UiGateway {
     const account = client.accounts.find((item) => item.consNoSrc === consNo);
     if (!account) return { ok: false, reason: 'error', message: '户号不在当前登录账号下' };
     try {
-      const snapshot = await client.snapshot(account);
+      const previous = this.store.loadAccountsCache()?.accounts.find(a=>a.consNo===consNo)?.data;
+      const snapshot = await client.snapshot(account,31,previous);
       const config = this.displayConfig();
       const theme = options?.theme || config.theme || 'light';
       const appearance = this.appearanceFor(consNo, account.address, config);

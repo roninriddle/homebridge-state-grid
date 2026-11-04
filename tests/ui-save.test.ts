@@ -95,6 +95,11 @@ describe('原生保存与卡片保存统一', () => {
     expect(new UiGateway(page.dir).fields().active).toEqual(['balance', 'currentMonthUsage']);
   });
 
+  it('新增同比指标和趋势图可随原生底部保存落盘',async()=>{
+    const page=ui();page.run("addField('latestMonthUsageYoY'); addField('monthlyTrend');");await page.bottomSave();
+    expect(new UiGateway(page.dir).fields().active).toEqual(['balance','currentMonthUsage','latestMonthUsageYoY','monthlyTrend']);
+  });
+
   it('快速连续编辑只把最新草稿送入底部保存模型', async () => {
     let finish!: () => void;
     let first = true;

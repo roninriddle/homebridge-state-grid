@@ -27,11 +27,14 @@ export const FIELD_KEYS = [
   'ladderLevel',
   'penalty',
   'historyOwe',
+  'latestMonthUsageYoY', 'latestMonthChargeYoY',
+  'samePeriodCurrentYearUsage', 'samePeriodLastYearUsage', 'samePeriodYearUsageYoY',
+  'lastYearMonthToDateUsage', 'monthToDateUsageYoY', 'monthlyTrend',
 ] as const;
 
 export type FieldKey = (typeof FIELD_KEYS)[number];
 
-export type FieldUnit = '元' | 'kWh' | '档';
+export type FieldUnit = '元' | 'kWh' | '档' | '%';
 
 export interface FieldMeta {
   /** 卡片上显示的标题。balance 的标题会按户号类型动态改为「应交电费」。 */
@@ -61,6 +64,14 @@ export const FIELD_META: Record<FieldKey, FieldMeta> = {
   ladderLevel: { label: '当前阶梯', unit: '档' },
   penalty: { label: '违约金', unit: '元' },
   historyOwe: { label: '历史欠费', unit: '元' },
+  latestMonthUsageYoY: {label:'结算月电量同比',unit:'%'},
+  latestMonthChargeYoY: {label:'结算月电费同比',unit:'%'},
+  samePeriodCurrentYearUsage: {label:'今年同期累计电量',unit:'kWh'},
+  samePeriodLastYearUsage: {label:'去年同期累计电量',unit:'kWh'},
+  samePeriodYearUsageYoY: {label:'同期累计电量同比',unit:'%'},
+  lastYearMonthToDateUsage: {label:'去年同日区间电量',unit:'kWh'},
+  monthToDateUsageYoY: {label:'同日区间电量同比',unit:'%'},
+  monthlyTrend: {label:'近12个结算月趋势图',unit:'kWh'},
 };
 
 /**
